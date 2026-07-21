@@ -1,0 +1,49 @@
+name: release
+
+# Releases are cut from version tags only — a normal push to a branch does not
+# build or publish anything. Tag a commit and push the tag to ship:
+#
+#   git tag v0.1.0
+#   git push origin v0.1.0
+#
+# The tag name (minus the leading "v") becomes the stamped build version.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub Release and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod # honors the pinned go/toolchain directives
+
+      - name: Test
+        run: go test ./...
+
+      - name: Derive version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >>"$GITHUB_OUTPUT"
+
+      - name: Build all platforms
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash build.sh "$VERSION"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/synologycollector_* dist/checksums.txt

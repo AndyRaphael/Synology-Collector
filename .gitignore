@@ -1,0 +1,16 @@
+# Build output
+/dist/
+/synologycollector
+/synologycollector.exe
+
+# Local secrets / scratch
+*.local
+secret.txt
+*.pem
+
+# OS junk
+.DS_Store
+
+# Go
+*.test
+*.out
