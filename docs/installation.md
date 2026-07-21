@@ -49,6 +49,13 @@ curl -fsSL -o synologycollector \
 chmod +x synologycollector
 ```
 
+> The `latest/download` URL only resolves if the release is marked as the repo's
+> **Latest** release — not a draft or pre-release. If it 404s, mark the release as
+> Latest (`gh release edit <tag> --latest`, or the checkbox in the Releases UI) or
+> pin to a version: `.../releases/download/v0.1.0/synologycollector_windows_amd64.exe`.
+> The [release workflow](#releasing-a-new-version) marks non-pre-release tags as
+> Latest automatically.
+
 **Releases API (discovers the version and checksum).** Use when you want to log
 which version you fetched or verify it against `checksums.txt`:
 
@@ -122,5 +129,7 @@ git push origin v0.1.0
 
 The workflow runs the tests, derives the version from the tag (`v0.1.0` →
 `0.1.0`), runs `build.sh`, and creates a GitHub Release with all binaries and
-`checksums.txt` attached. Use a pre-1.0 tag like `v0.1.0` while the tool is still
-stabilizing; a `-rc` suffix (`v0.2.0-rc1`) marks a pre-release.
+`checksums.txt` attached. A hyphenated tag (`v0.2.0-rc1`) is published as a
+**pre-release**; any other tag is marked as the repo's **Latest** release, so the
+`releases/latest/download/` permalinks resolve to it. Use a pre-1.0 tag like
+`v0.1.0` while the tool is still stabilizing.
