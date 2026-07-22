@@ -110,7 +110,10 @@ const defaultStorage = `{
     {"id":"sata1","name":"Drive 1","model":"HAT5300-4T","status":"normal","temp":34,"size_total":"4000000000000"},
     {"id":"sata2","name":"Drive 2","model":"HAT5300-4T","status":"normal","temp":35,"size_total":"4000000000000"}
   ],
-  "storageMachineInfo":[{"nameStr":"nas01","modelName":"DS723+"}]
+  "env":{"status":{"system_crashed":false},"storageMachineInfo":[
+    {"nameStr":"expansion-1","modelName":"DX517","order":1},
+    {"nameStr":"nas01","modelName":"DS723+","order":0}
+  ]}
 }`
 
 const defaultTasks = `{"tasks":[

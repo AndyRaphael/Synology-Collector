@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"io"
@@ -465,9 +466,34 @@ var embedFuncs = template.FuncMap{
 
 var htmlEmbedTemplate = template.Must(template.New("embed").Funcs(embedFuncs).Parse(htmlEmbedSrc))
 
-// renderHTMLEmbed writes the inline-styled HTML fragment for r to w.
+// renderHTMLEmbed writes the inline-styled HTML fragment for r to w, folded to
+// pure ASCII so it survives an embedding field that assumes a non-UTF-8 charset.
 func renderHTMLEmbed(w io.Writer, r *Report) error {
-	return htmlEmbedTemplate.Execute(w, buildHTMLView(r))
+	var buf bytes.Buffer
+	if err := htmlEmbedTemplate.Execute(&buf, buildHTMLView(r)); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, asciiFold(buf.String()))
+	return err
+}
+
+// asciiFold replaces every non-ASCII rune with an HTML numeric character
+// reference. The fragment is dropped into rich-text fields that carry no
+// <meta charset> and are frequently read as Windows-1252 (PowerShell 5.1's
+// default file encoding), which mangles UTF-8 bytes into mojibake (·→Â·,
+// °→Â°, —→â€"). Numeric entities are pure ASCII and render identically under
+// any charset — and this also covers non-ASCII task names.
+func asciiFold(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r < 128 {
+			b.WriteRune(r)
+		} else {
+			fmt.Fprintf(&b, "&#%d;", r)
+		}
+	}
+	return b.String()
 }
 
 const htmlReportSrc = `<!doctype html>

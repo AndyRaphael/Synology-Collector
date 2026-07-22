@@ -172,7 +172,9 @@ if ($ReportField -and (Test-Path $ReportPath)) {
     try {
         # WYSIWYG values can be large, so use the piped setter (reads the value
         # from stdin) instead of passing the HTML as a command-line argument.
-        Get-Content -Raw -Path $ReportPath | Ninja-Property-Set-Piped $ReportField
+        # Read as UTF-8 explicitly — Windows PowerShell 5.1's Get-Content default
+        # is ANSI, which would corrupt any non-ASCII output.
+        Get-Content -Raw -Encoding UTF8 -Path $ReportPath | Ninja-Property-Set-Piped $ReportField
     } catch {
         Write-Output "WARN=could not set WYSIWYG field $ReportField : $_"
     }

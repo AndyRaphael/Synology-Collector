@@ -236,17 +236,52 @@ type rawDisk struct {
 	SizeTotal FlexInt64  `json:"size_total"`
 }
 
-// rawMachineInfo is one entry of the storage response's storageMachineInfo,
-// where DSM carries the NAS hostname (nameStr).
-type rawMachineInfo struct {
-	NameStr FlexString `json:"nameStr"`
+type rawStorage struct {
+	StoragePools []rawPool   `json:"storagePools"`
+	Volumes      []rawVolume `json:"volumes"`
+	Disks        []rawDisk   `json:"disks"`
 }
 
-type rawStorage struct {
-	StoragePools       []rawPool        `json:"storagePools"`
-	Volumes            []rawVolume      `json:"volumes"`
-	Disks              []rawDisk        `json:"disks"`
-	StorageMachineInfo []rawMachineInfo `json:"storageMachineInfo"`
+// machineNameFromStorage finds the NAS hostname in a decoded storage response.
+// DSM carries it in storageMachineInfo[].nameStr but nests that object at a
+// model-dependent depth (not always at the top of data), so this walks the tree
+// and prefers the primary unit (lowest order) over any expansion units.
+func machineNameFromStorage(v any) string {
+	best, bestOrder := "", int64(1)<<62
+	var walk func(any)
+	walk = func(node any) {
+		switch t := node.(type) {
+		case map[string]any:
+			if arr, ok := t["storageMachineInfo"].([]any); ok {
+				for _, e := range arr {
+					m, ok := e.(map[string]any)
+					if !ok {
+						continue
+					}
+					name, _ := m["nameStr"].(string)
+					if strings.TrimSpace(name) == "" {
+						continue
+					}
+					order := int64(1) << 61 // no order → sort after any real order
+					if o, ok := m["order"].(float64); ok {
+						order = int64(o)
+					}
+					if order < bestOrder {
+						best, bestOrder = strings.TrimSpace(name), order
+					}
+				}
+			}
+			for _, child := range t {
+				walk(child)
+			}
+		case []any:
+			for _, e := range t {
+				walk(e)
+			}
+		}
+	}
+	walk(v)
+	return best
 }
 
 // collectStorage retrieves pools, volumes, and disks. Volumes==0 is a hard error
@@ -301,8 +336,11 @@ func collectStorage(ctx context.Context, c *Client) (*StorageInfo, error) {
 		vol.UsedPct = usedPct(total, used)
 		st.Volumes = append(st.Volumes, vol)
 	}
-	if len(rs.StorageMachineInfo) > 0 {
-		st.machineName = firstNonEmpty(string(rs.StorageMachineInfo[0].NameStr))
+	// The hostname is nested at a model-dependent depth, so search the decoded
+	// tree rather than relying on a fixed field path.
+	var generic any
+	if err := json.Unmarshal(data, &generic); err == nil {
+		st.machineName = machineNameFromStorage(generic)
 	}
 	for i, d := range rs.Disks {
 		disk := Disk{

@@ -160,6 +160,15 @@ func TestRenderHTMLEmbedWYSIWYGSafe(t *testing.T) {
 	if strings.Contains(out, "ZgotmplZ") {
 		t.Error("fragment contains ZgotmplZ — an inline style was filtered")
 	}
+	// Pure ASCII: no raw UTF-8 bytes that a non-UTF-8 field would turn to mojibake.
+	for i := 0; i < len(out); i++ {
+		if out[i] > 127 {
+			t.Fatalf("fragment has a non-ASCII byte at offset %d; expected numeric entities only", i)
+		}
+	}
+	if !strings.Contains(out, "&#176;") { // the ° in "32°C", folded to an entity
+		t.Error("expected the degree sign as a numeric entity (&#176;) in the fragment")
+	}
 }
 
 func TestRenderHTMLEmbedErrorReportNilSections(t *testing.T) {
