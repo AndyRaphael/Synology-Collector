@@ -49,6 +49,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	report := collect(context.Background(), cfg, time.Now, debugf)
 
+	// The HTML report is a convenience artifact, not the health signal: a write
+	// failure is reported on stderr but must not override the collector's
+	// health-based exit code that RMM conditions depend on.
+	if cfg.HTMLFile != "" {
+		if err := writeHTMLReport(cfg.HTMLFile, report); err != nil {
+			fmt.Fprintf(stderr, "warning: could not write HTML report to %s: %v\n", cfg.HTMLFile, err)
+		}
+	}
+	if cfg.EmbedHTMLFile != "" {
+		if err := writeHTMLEmbed(cfg.EmbedHTMLFile, report); err != nil {
+			fmt.Fprintf(stderr, "warning: could not write HTML fragment to %s: %v\n", cfg.EmbedHTMLFile, err)
+		}
+	}
+
 	if err := render(stdout, cfg.Format, report); err != nil {
 		// Failing to deliver the report is itself a collector failure.
 		fmt.Fprintf(stderr, "error writing output: %v\n", err)
@@ -59,16 +73,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // requestedFormat recovers the --format value directly from args so that config
 // errors (where full parsing did not complete) still honor the requested format.
-// An absent or invalid value falls back to "both".
+// An absent or invalid value falls back to "kv" (the default output format).
 func requestedFormat(args []string) string {
 	norm := func(s string) string {
 		switch strings.ToLower(strings.TrimSpace(s)) {
-		case "kv":
-			return "kv"
 		case "json":
 			return "json"
-		default:
+		case "both":
 			return "both"
+		default:
+			return "kv"
 		}
 	}
 	for i := 0; i < len(args); i++ {
@@ -84,7 +98,7 @@ func requestedFormat(args []string) string {
 			return norm(strings.TrimPrefix(a, "-format="))
 		}
 	}
-	return "both"
+	return "kv"
 }
 
 // collect is the engine: it performs the whole DSM interaction and returns a fully
@@ -133,6 +147,12 @@ func collect(ctx context.Context, cfg *Config, clock func() time.Time, debugf fu
 		return finishError(r, "NAS became unreachable during storage collection: "+ferr.Error())
 	}
 	r.Storage = st
+
+	// DSM exposes the NAS hostname in the storage payload, not system info, so
+	// backfill it when system info didn't carry one.
+	if sys.Hostname == "" {
+		sys.Hostname = st.machineName
+	}
 
 	abb, ferr := collectABB(runCtx, client, cfg, now)
 	if ferr != nil {

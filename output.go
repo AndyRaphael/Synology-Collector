@@ -130,6 +130,8 @@ func renderKV(r *Report) string {
 	}
 	write("NAS", kvNAS(sys))
 	write("DSM", kvDSM(sys))
+	write("HOSTNAME", kvHostname(sys))
+	write("UPTIME", kvUptime(sys))
 	write("SYSTEM_HEALTH", kvSystemHealth(checks, st))
 	write("STORAGE_POOL", kvStoragePool(st))
 	write("VOLUME_USAGE", kvVolumeUsage(st))
@@ -171,6 +173,20 @@ func kvNAS(sys *SystemInfo) string {
 func kvDSM(sys *SystemInfo) string {
 	if sys != nil && sys.VersionShort != "" {
 		return sys.VersionShort
+	}
+	return "Unknown"
+}
+
+func kvHostname(sys *SystemInfo) string {
+	if sys != nil && sys.Hostname != "" {
+		return sys.Hostname
+	}
+	return "Unknown"
+}
+
+func kvUptime(sys *SystemInfo) string {
+	if sys != nil && sys.UptimeSec > 0 {
+		return humanUptime(sys.UptimeSec)
 	}
 	return "Unknown"
 }

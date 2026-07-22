@@ -37,6 +37,7 @@ func TestDriveStatusSeverity(t *testing.T) {
 		want   Severity
 	}{
 		{"normal", SevOK},
+		{"sys_partition_normal", SevOK}, // healthy DSM system partition, not a warning
 		{"warning", SevWarning},
 		{"abnormal", SevWarning},
 		{"failing", SevCritical},
@@ -47,6 +48,25 @@ func TestDriveStatusSeverity(t *testing.T) {
 		got, _ := statusSeverity("Drive", tc.status, driveStatusSeverity)
 		if got != tc.want {
 			t.Errorf("drive status %q -> %v, want %v", tc.status, got, tc.want)
+		}
+	}
+}
+
+func TestDriveLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"Drive 4", "Drive 4"},         // DSM already says "Drive N" — no doubling
+		{"drive 4", "drive 4"},         // case-insensitive
+		{"Drive", "Drive"},             // bare word, left as-is
+		{"sata1", "Drive sata1"},       // raw id gets a prefix
+		{"Driver 1", "Drive Driver 1"}, // "drive" not a standalone word
+		{"", "Drive"},
+	}
+	for _, tc := range cases {
+		if got := driveLabel(tc.name); got != tc.want {
+			t.Errorf("driveLabel(%q) = %q, want %q", tc.name, got, tc.want)
 		}
 	}
 }

@@ -55,12 +55,18 @@ $ExtraArgs = @(
     # '--tls-pin', '<sha256-fingerprint>'
 )
 
-# Map KV output to NinjaOne custom fields? Requires the output fields to exist
-# first, each with Script Permission = Read/Write.
+# Map KV output to NinjaOne custom fields? OFF by default: while this is $false
+# the script only logs to the activity log and your syno* fields stay EMPTY.
+# Set it to $true once the output fields exist, each assigned to the device role
+# with Script Permission = Read/Write. The left side of $FieldMap is the KV key
+# the collector emits (e.g. SUMMARY); the right side is your NinjaOne field's
+# machine name (e.g. synoSummary) — keep the field named exactly as on the right.
 $MapCustomFields = $false
 $FieldMap = @{
     'STATUS'         = 'synoStatus'
     'NAS'            = 'synoModel'
+    'HOSTNAME'       = 'synoHostname'
+    'UPTIME'         = 'synoUptime'
     'DSM'            = 'synoDsmVersion'
     'SYSTEM_HEALTH'  = 'synoSystemHealth'
     'STORAGE_POOL'   = 'synoStoragePool'
@@ -71,6 +77,15 @@ $FieldMap = @{
     'COLLECTED_AT'   = 'synoCollectedAt'
     'SUMMARY'        = 'synoSummary'
 }
+
+# Push the rendered HTML report into a NinjaOne WYSIWYG custom field (rich text)?
+# Set $ReportField to your WYSIWYG field's machine name, or '' to disable.
+# IMPORTANT: the field type MUST be WYSIWYG. An Attachment field will NOT work —
+# attachment fields are read-only to automations. WYSIWYG fields also strip
+# <style>/<script>, which is why the collector emits an inline-styled fragment
+# (--html-embed-file) specifically for this, not the standalone --html-file page.
+$ReportField = 'synoReport'
+$ReportPath  = Join-Path $InstallDir 'report.html'
 
 # --- Validate credentials ----------------------------------------------------
 
@@ -117,6 +132,7 @@ $collectorArgs = @(
     '--username', $DsmUsername,
     '--format', 'both'
 ) + $ExtraArgs
+if ($ReportField) { $collectorArgs += @('--html-embed-file', $ReportPath) }
 
 try {
     $output = & $Exe @collectorArgs 2>&1
@@ -147,6 +163,18 @@ if ($MapCustomFields) {
         }
         # Stop mapping once the KV block ends (JSON section begins after '---').
         if ($line -eq '---') { break }
+    }
+}
+
+# --- Optional: push the HTML report into a WYSIWYG custom field ---------------
+
+if ($ReportField -and (Test-Path $ReportPath)) {
+    try {
+        # WYSIWYG values can be large, so use the piped setter (reads the value
+        # from stdin) instead of passing the HTML as a command-line argument.
+        Get-Content -Raw -Path $ReportPath | Ninja-Property-Set-Piped $ReportField
+    } catch {
+        Write-Output "WARN=could not set WYSIWYG field $ReportField : $_"
     }
 }
 

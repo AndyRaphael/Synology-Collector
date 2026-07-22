@@ -24,3 +24,18 @@ single table and treats anything unrecognized as *indeterminate* (a warning,
 never a silent "healthy"). Run once with `--debug` against your NAS to capture
 the real status strings in the JSON `raw` section; if any are unrecognized, they
 can be added to the classifier in one place.
+
+## Notes on storage & drive status
+
+Pool, volume, and drive statuses are classified the same way — an exact-match
+table with anything unrecognized reported as a *warning* (never silent-healthy).
+
+One benign case worth knowing: DSM keeps a copy of its OS ("system partition")
+mirrored across **every** drive, and reports that partition's health as a
+separate dimension from the drive's SMART/allocation health. A perfectly healthy
+drive therefore sometimes reads `sys_partition_normal` instead of `normal` —
+both mean healthy, and the collector treats them identically. A *failed* system
+partition (a genuinely different, unrecognized status word) still surfaces as a
+warning so it is never missed. If a `--debug` run shows a drive status the
+collector doesn't recognize but DSM's Storage Manager calls healthy, add it to
+`driveStatusSeverity` in [`checks.go`](../checks.go).

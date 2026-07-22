@@ -106,6 +106,8 @@ Step 2, then set `$MapCustomFields = $true` in the script. The field names mirro
 |---|---|---|---|
 | `synoStatus` | Text | `STATUS` | `OK` / `WARNING` / `CRITICAL` / `ERROR` |
 | `synoModel` | Text | `NAS` | e.g. `DS723+` |
+| `synoHostname` | Text | `HOSTNAME` | NAS name, e.g. `jellyflame` |
+| `synoUptime` | Text | `UPTIME` | humanized, e.g. `9d 14h 40m` — Text, not a number |
 | `synoDsmVersion` | Text | `DSM` | e.g. `7.2.2` |
 | `synoSystemHealth` | Text | `SYSTEM_HEALTH` | worst of pool/volume/drive |
 | `synoStoragePool` | Text | `STORAGE_POOL` | e.g. `Healthy` |
@@ -142,6 +144,29 @@ check that never runs never alerts. Cover it RMM-side:
   type for `synoCollectedAt` and its built-in "older than" comparison. If not,
   keep it **Text** and fall back to NinjaOne's native **agent-offline** condition
   on the proxy device as a backstop.
+
+## Step 7 — (Optional) Render the report in a WYSIWYG field
+
+To show the full styled report on the device page, push it into a **WYSIWYG**
+custom field:
+
+1. **Add → Field**, type **WYSIWYG**, machine name `synoReport`, **Script
+   Permission = Read/Write**. Assign it to the device role (Step 2).
+2. In the script, `$ReportField = 'synoReport'` (already set in the example; set
+   it to `''` to disable). The script runs the collector with
+   `--html-embed-file` and pushes the result with `Ninja-Property-Set-Piped`
+   (piped because the HTML is larger than a command-line argument should carry).
+
+> ⚠️ **It must be a WYSIWYG field, not an Attachment field.** Attachment fields
+> are **read-only to automations** — a script cannot write one — so that route
+> can't work. WYSIWYG is the writable rich-text option.
+
+> ⚠️ **Why a separate fragment.** WYSIWYG editors **sanitize out `<style>` and
+> `<script>`**, so the standalone `--html-file` page would render unstyled in a
+> field. The collector's `--html-embed-file` emits an **inline-styled** fragment
+> built for exactly this — it keeps its status colors inside the field. Use
+> `--html-file` for a browser/share/ticket copy, `--html-embed-file` for the
+> field. See [Output → Embedding](output.md#embedding-in-a-rich-text--wysiwyg-field---html-embed-file).
 
 ## Using another RMM
 

@@ -47,23 +47,25 @@ type TaskOverride struct {
 // Config holds all resolved runtime configuration. Password is never marshaled;
 // the JSON echo (see ConfigEcho in output.go) deliberately omits it.
 type Config struct {
-	RawHost      string // as supplied, for diagnostics
-	Host         string // normalized base URL, e.g. https://192.168.1.20:5001
-	Scheme       string // "https" or "http"
-	Username     string
-	Password     string
-	VolWarnPct   int
-	VolCritPct   int
-	BackupMaxAge time.Duration
-	TaskMaxAge   []TaskOverride
-	ExcludeTasks []Selector
-	Timeout      time.Duration
-	AllowHTTP    bool
-	InsecureTLS  bool
-	CAFile       string
-	TLSPin       string // normalized lowercase hex SHA-256, or ""
-	Format       string // kv | json | both
-	Debug        bool
+	RawHost       string // as supplied, for diagnostics
+	Host          string // normalized base URL, e.g. https://192.168.1.20:5001
+	Scheme        string // "https" or "http"
+	Username      string
+	Password      string
+	VolWarnPct    int
+	VolCritPct    int
+	BackupMaxAge  time.Duration
+	TaskMaxAge    []TaskOverride
+	ExcludeTasks  []Selector
+	Timeout       time.Duration
+	AllowHTTP     bool
+	InsecureTLS   bool
+	CAFile        string
+	TLSPin        string // normalized lowercase hex SHA-256, or ""
+	Format        string // kv | json | both
+	HTMLFile      string // optional path for a self-contained human-readable HTML report
+	EmbedHTMLFile string // optional path for an inline-styled HTML fragment (WYSIWYG fields)
+	Debug         bool
 }
 
 // stringList accumulates a repeatable flag's values.
@@ -95,7 +97,9 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 		insecure     = fs.Bool("insecure-skip-verify", false, "disable TLS certificate verification (last resort)")
 		caFile       = fs.String("ca-file", "", "PEM CA bundle for TLS verification")
 		tlsPin       = fs.String("tls-pin", "", "SHA-256 fingerprint of the server leaf certificate (hex; alternate verification mode for self-signed certs)")
-		format       = fs.String("format", "both", "output format: kv | json | both")
+		format       = fs.String("format", "kv", "output format: kv | json | both")
+		htmlFile     = fs.String("html-file", "", "also write a self-contained HTML summary report to this path")
+		embedHTML    = fs.String("html-embed-file", "", "also write an inline-styled HTML fragment (for a NinjaOne WYSIWYG field) to this path")
 		debug        = fs.Bool("debug", false, "include raw API payloads in JSON and verbose diagnostics on stderr")
 		showVersion  = fs.Bool("version", false, "print version and exit")
 	)
@@ -115,15 +119,17 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 	}
 
 	cfg := &Config{
-		VolWarnPct:   *volWarn,
-		VolCritPct:   *volCrit,
-		BackupMaxAge: *backupMaxAge,
-		Timeout:      *timeout,
-		AllowHTTP:    *allowHTTP,
-		InsecureTLS:  *insecure,
-		CAFile:       *caFile,
-		Debug:        *debug,
-		Format:       strings.ToLower(strings.TrimSpace(*format)),
+		VolWarnPct:    *volWarn,
+		VolCritPct:    *volCrit,
+		BackupMaxAge:  *backupMaxAge,
+		Timeout:       *timeout,
+		AllowHTTP:     *allowHTTP,
+		InsecureTLS:   *insecure,
+		CAFile:        *caFile,
+		Debug:         *debug,
+		Format:        strings.ToLower(strings.TrimSpace(*format)),
+		HTMLFile:      strings.TrimSpace(*htmlFile),
+		EmbedHTMLFile: strings.TrimSpace(*embedHTML),
 	}
 
 	// Host (flag, then env).

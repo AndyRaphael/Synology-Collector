@@ -418,8 +418,8 @@ func TestConfigErrorHonorsFormat(t *testing.T) {
 		{"kv", []string{"--format", "kv", "--vol-warn", "95", "--vol-crit", "90"}, true, false},
 		{"json", []string{"--format", "json", "--vol-warn", "95", "--vol-crit", "90"}, false, true},
 		{"both", []string{"--format", "both", "--vol-warn", "95", "--vol-crit", "90"}, true, true},
-		{"invalid-format-falls-back-both", []string{"--format", "yaml"}, true, true},
-		{"missing-format-arg-falls-back-both", []string{"--format"}, true, true},
+		{"invalid-format-falls-back-kv", []string{"--format", "yaml"}, true, false},
+		{"missing-format-arg-falls-back-kv", []string{"--format"}, true, false},
 		{"equals-form-json", []string{"--format=json"}, false, true},
 	}
 	for _, tc := range cases {

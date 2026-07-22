@@ -98,7 +98,8 @@ func defaultScenario() *dsmScenario {
 	}
 }
 
-const defaultSystem = `{"model":"DS723+","firmware_ver":"DSM 7.2.2-72806 Update 3","serial":"2340ABC","hostname":"nas01"}`
+// Mirrors real DSM: no hostname field, and uptime as the up_time "H:M:S" string.
+const defaultSystem = `{"model":"DS723+","firmware_ver":"DSM 7.2.2-72806 Update 3","serial":"2340ABC","up_time":"230:40:35"}`
 
 // One healthy pool, one volume at 68%, two healthy drives. Sizes as strings to
 // exercise FlexInt64.
@@ -108,7 +109,8 @@ const defaultStorage = `{
   "disks":[
     {"id":"sata1","name":"Drive 1","model":"HAT5300-4T","status":"normal","temp":34,"size_total":"4000000000000"},
     {"id":"sata2","name":"Drive 2","model":"HAT5300-4T","status":"normal","temp":35,"size_total":"4000000000000"}
-  ]
+  ],
+  "storageMachineInfo":[{"nameStr":"nas01","modelName":"DS723+"}]
 }`
 
 const defaultTasks = `{"tasks":[

@@ -29,7 +29,9 @@ synologycollector
 | `--insecure-skip-verify` | — | off | Disable TLS certificate verification (last resort). |
 | `--ca-file` | — | — | PEM CA bundle for TLS verification. |
 | `--tls-pin` | — | — | SHA-256 fingerprint of the server certificate (see [Synology NAS setup → TLS](synology-setup.md#tls)). |
-| `--format` | — | `both` | `kv`, `json`, or `both`. |
+| `--format` | — | `kv` | `kv`, `json`, or `both` (KV block, `---`, then JSON). |
+| `--html-file` | — | — | Also write a self-contained HTML summary report to this path (see [Output → HTML report](output.md#html-report)). |
+| `--html-embed-file` | — | — | Also write an inline-styled HTML fragment for a rich-text / NinjaOne WYSIWYG field (see [Output → Embedding](output.md#embedding-in-a-rich-text--wysiwyg-field---html-embed-file)). |
 | `--debug` | — | off | Include raw API payloads in JSON and verbose diagnostics on stderr. |
 | `--version` | — | — | Print version and exit. |
 

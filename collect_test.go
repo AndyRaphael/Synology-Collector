@@ -6,6 +6,43 @@ import (
 	"time"
 )
 
+func TestParseUptime(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int64
+	}{
+		{"230:40:35", 830435}, // real DSM value: 230h 40m 35s
+		{"1:00:00", 3600},
+		{"0:00:00", 0},
+		{" 12:30:00 ", 45000}, // surrounding whitespace tolerated
+		{"", 0},
+		{"garbage", 0},
+		{"12:30", 0},    // too few fields
+		{"-1:00:00", 0}, // negative rejected
+		{"a:b:c", 0},    // non-numeric rejected
+	}
+	for _, tc := range cases {
+		if got := parseUptime(tc.in); got != tc.want {
+			t.Errorf("parseUptime(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+// The NAS hostname comes from the storage payload (storageMachineInfo.nameStr),
+// not system info, and uptime from the up_time string — both must land on System.
+func TestSystemHostnameBackfillAndUptime(t *testing.T) {
+	r := runScenario(t, defaultScenario(), nil)
+	if r.System == nil {
+		t.Fatal("System is nil")
+	}
+	if r.System.Hostname != "nas01" {
+		t.Errorf("Hostname = %q, want nas01 (backfilled from storageMachineInfo.nameStr)", r.System.Hostname)
+	}
+	if r.System.UptimeSec != 830435 {
+		t.Errorf("UptimeSec = %d, want 830435 (parsed from up_time %q)", r.System.UptimeSec, "230:40:35")
+	}
+}
+
 func TestClassifyABBStatus(t *testing.T) {
 	cases := []struct {
 		in   string

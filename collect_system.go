@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -73,6 +74,10 @@ type StorageInfo struct {
 	Pools       []Pool         `json:"pools"`
 	Volumes     []Volume       `json:"volumes"`
 	Disks       []Disk         `json:"disks"`
+
+	// machineName is the NAS hostname, which DSM reports here (storageMachineInfo)
+	// rather than in SYNO.Core.System. collect() backfills System.Hostname from it.
+	machineName string
 }
 
 var versionShortRe = regexp.MustCompile(`\d+\.\d+(?:\.\d+)?`)
@@ -126,7 +131,26 @@ type rawSystem struct {
 	Version       FlexString `json:"version"`
 	FirmwareVer   FlexString `json:"firmware_ver"`
 	VersionString FlexString `json:"version_string"`
-	Uptime        FlexInt64  `json:"uptime"`
+	// DSM reports uptime as up_time: a "H:M:S" string (hours may exceed 24), not
+	// a numeric uptime. Uptime is kept as a fallback for other DSM shapes.
+	UpTime FlexString `json:"up_time"`
+	Uptime FlexInt64  `json:"uptime"`
+}
+
+// parseUptime converts DSM's up_time ("230:40:35" = hours:minutes:seconds, hours
+// unbounded) into seconds. Returns 0 for an empty or malformed value.
+func parseUptime(s string) int64 {
+	parts := strings.Split(strings.TrimSpace(s), ":")
+	if len(parts) != 3 {
+		return 0
+	}
+	h, err1 := strconv.ParseInt(parts[0], 10, 64)
+	m, err2 := strconv.ParseInt(parts[1], 10, 64)
+	sec, err3 := strconv.ParseInt(parts[2], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil || h < 0 || m < 0 || sec < 0 {
+		return 0
+	}
+	return h*3600 + m*60 + sec
 }
 
 // collectSystem retrieves model/version/hostname. A network error is fatal
@@ -158,7 +182,10 @@ func collectSystem(ctx context.Context, c *Client) (*SystemInfo, error) {
 	si.Hostname = firstNonEmpty(string(rs.Hostname))
 	si.VersionFull = firstNonEmpty(string(rs.FirmwareVer), string(rs.VersionString), string(rs.Version))
 	si.VersionShort = extractVersionShort(si.VersionFull)
-	si.UptimeSec = int64(rs.Uptime)
+	si.UptimeSec = parseUptime(string(rs.UpTime))
+	if si.UptimeSec == 0 {
+		si.UptimeSec = int64(rs.Uptime)
+	}
 	si.State = StateOK
 	return si, nil
 }
@@ -209,10 +236,17 @@ type rawDisk struct {
 	SizeTotal FlexInt64  `json:"size_total"`
 }
 
+// rawMachineInfo is one entry of the storage response's storageMachineInfo,
+// where DSM carries the NAS hostname (nameStr).
+type rawMachineInfo struct {
+	NameStr FlexString `json:"nameStr"`
+}
+
 type rawStorage struct {
-	StoragePools []rawPool   `json:"storagePools"`
-	Volumes      []rawVolume `json:"volumes"`
-	Disks        []rawDisk   `json:"disks"`
+	StoragePools       []rawPool        `json:"storagePools"`
+	Volumes            []rawVolume      `json:"volumes"`
+	Disks              []rawDisk        `json:"disks"`
+	StorageMachineInfo []rawMachineInfo `json:"storageMachineInfo"`
 }
 
 // collectStorage retrieves pools, volumes, and disks. Volumes==0 is a hard error
@@ -266,6 +300,9 @@ func collectStorage(ctx context.Context, c *Client) (*StorageInfo, error) {
 		}
 		vol.UsedPct = usedPct(total, used)
 		st.Volumes = append(st.Volumes, vol)
+	}
+	if len(rs.StorageMachineInfo) > 0 {
+		st.machineName = firstNonEmpty(string(rs.StorageMachineInfo[0].NameStr))
 	}
 	for i, d := range rs.Disks {
 		disk := Disk{

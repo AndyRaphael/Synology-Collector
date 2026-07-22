@@ -51,21 +51,26 @@ synologycollector
 The storage and Active Backup APIs require an **administrators-group** DSM
 account — see [Synology NAS setup](docs/synology-setup.md).
 
-Example output (`--format both`, trimmed):
+Example output (default `--format kv`, trimmed):
 
 ```
 STATUS=OK
 NAS=DS723+
 DSM=7.2.2
+HOSTNAME=jellyflame
+UPTIME=9d 14h 40m
 ABB_STATE=OK
 ABB_MONITORED=7
 ABB_FAILED=0
 ABB_OVERDUE=1
 LAST_SUCCESS=2026-07-21T02:14:00Z
-SUMMARY=1 Active Backup task(s) overdue: WS-05 (last success 2026-07-19T02:14:00Z)
----
-{ ... full JSON report ... }
+SUMMARY=1 Active Backup task(s) overdue: WS-05 (last success 2026-07-19 02:14 UTC)
 ```
+
+Add `--format json` for the full JSON document, or `--format both` for the KV
+block followed by a `---` line and then the JSON. For a human-readable view, add
+`--html-file <path>` to also write a self-contained, styled HTML summary (see
+[Output → HTML report](docs/output.md#html-report)).
 
 ## Exit codes
 

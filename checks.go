@@ -6,7 +6,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Severity is the outcome of a single check. Order matters: the overall status is
@@ -57,9 +56,15 @@ var poolStatusSeverity = map[string]Severity{
 	"deleting": SevCritical, "unknown": SevWarning,
 }
 
-// driveStatusSeverity maps DSM disk status words to severities.
+// driveStatusSeverity maps DSM disk status words to severities. DSM reports the
+// drive's DSM-system-partition state (a RAID1 OS mirror spread across every
+// drive) as a distinct dimension from SMART/allocation health, so a perfectly
+// healthy drive can read "sys_partition_normal" instead of "normal" — both are
+// healthy. The failure counterpart (a failed/damaged system partition) is left
+// to the unknown->warning fallback so it still surfaces, never silently OK.
 var driveStatusSeverity = map[string]Severity{
 	"normal": SevOK, "healthy": SevOK, "good": SevOK, "online": SevOK,
+	"sys_partition_normal": SevOK,
 
 	"warning": SevWarning, "attention": SevWarning, "abnormal": SevWarning,
 	"degraded": SevWarning, "below": SevWarning,
@@ -132,7 +137,7 @@ func evaluate(cfg *Config, sys *SystemInfo, st *StorageInfo, abb *ABBInfo) []Che
 			}
 		}
 		for _, d := range st.Disks {
-			sev, msg := statusSeverity("Drive "+d.Name, d.Status, driveStatusSeverity)
+			sev, msg := statusSeverity(driveLabel(d.Name), d.Status, driveStatusSeverity)
 			add("drive_health:"+d.Name, sev, msg, d.Status)
 		}
 		if len(st.Disks) == 0 {
@@ -225,7 +230,7 @@ func overdueMessage(abb *ABBInfo) string {
 			continue
 		}
 		if t.LastSuccess != nil {
-			parts = append(parts, fmt.Sprintf("%s (last success %s)", t.Name, t.LastSuccess.UTC().Format(time.RFC3339)))
+			parts = append(parts, fmt.Sprintf("%s (last success %s)", t.Name, humanTime(*t.LastSuccess)))
 		} else {
 			parts = append(parts, fmt.Sprintf("%s (never)", t.Name))
 		}
@@ -249,6 +254,23 @@ func volLabel(v Volume) string {
 		return v.Name
 	}
 	return v.ID
+}
+
+// driveLabel prefixes a disk name with "Drive " for readable check messages,
+// unless DSM already names the disk "Drive N" — which would otherwise read as
+// the doubled "Drive Drive 4". Matching is case-insensitive and only skips the
+// prefix when "drive" is a standalone leading word, so a name like "Driver 1"
+// still gets its prefix.
+func driveLabel(name string) string {
+	if name == "" {
+		return "Drive"
+	}
+	if lower := strings.ToLower(name); strings.HasPrefix(lower, "drive") {
+		if rest := lower[len("drive"):]; rest == "" || rest[0] < 'a' || rest[0] > 'z' {
+			return name
+		}
+	}
+	return "Drive " + name
 }
 
 // pctInt rounds a percentage to the nearest whole number, clamped to [0,100].
