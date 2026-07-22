@@ -8,24 +8,25 @@ source.
 
 Prebuilt binaries are attached to each [GitHub Release](https://github.com/AndyRaphael/Synology-Collector/releases).
 (They are **not** committed to the repo — `dist/` is a local build directory and
-is gitignored.) Every release ships two names per platform plus a
+is gitignored.) Every release ships one binary per platform plus a
 `checksums.txt`:
 
-| Platform | Stable name (always latest) | Versioned name |
-|----------|-----------------------------|----------------|
-| Windows x86-64 | `synologycollector_windows_amd64.exe` | `synologycollector_<ver>_windows_amd64.exe` |
-| Linux x86-64 | `synologycollector_linux_amd64` | `synologycollector_<ver>_linux_amd64` |
-| Linux ARM64 | `synologycollector_linux_arm64` | `synologycollector_<ver>_linux_arm64` |
-| macOS Apple silicon | `synologycollector_darwin_arm64` | `synologycollector_<ver>_darwin_arm64` |
+| Platform | File name |
+|----------|-----------|
+| Windows x86-64 | `synologycollector_windows_amd64.exe` |
+| Linux x86-64 | `synologycollector_linux_amd64` |
+| Linux ARM64 | `synologycollector_linux_arm64` |
+| macOS Apple silicon | `synologycollector_darwin_arm64` |
 
-The **versioned** name is self-describing — good for archiving and support
-tickets. The **stable** name is byte-identical and never changes, so a
-`releases/latest/download/` URL stays constant across versions (see below).
+The file name is stable and never changes across versions, so a
+`releases/latest/download/` URL stays constant (see below). To pin a specific
+version, download the same name from that release's tag — e.g.
+`.../releases/download/v0.1.0/synologycollector_windows_amd64.exe`.
 
 The binary is statically linked (`CGO_ENABLED=0`) and needs no installer,
 service, or agent — your RMM invokes it directly. The version is baked in at
 build time, so `synologycollector --version` and the `COLLECTOR_VERSION` output
-field report it regardless of which filename you downloaded.
+field report it no matter what you name the file locally.
 
 ## Automating the "latest" download
 
@@ -84,8 +85,8 @@ permalink avoids the limit entirely.
 
 Building requires the Go toolchain (see [Toolchain](#toolchain) below).
 
-Cross-compile every platform into `./dist/` (versioned names, stable aliases,
-and `checksums.txt` — exactly what a release ships):
+Cross-compile every platform into `./dist/` (one binary per platform plus
+`checksums.txt` — exactly what a release ships):
 
 ```bash
 ./build.sh 0.1.0

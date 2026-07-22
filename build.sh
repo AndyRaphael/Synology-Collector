@@ -5,12 +5,12 @@
 #   VERSION defaults to "dev". Example: ./build.sh 0.1.0
 #
 # Output lands in ./dist/. CGO is disabled so every target is a static,
-# dependency-free executable. For each target two file names are written:
-#   synologycollector_<version>_<os>_<arch>[.exe]  canonical, self-describing
-#   synologycollector_<os>_<arch>[.exe]            stable alias, so a
-#                                                  releases/latest/download URL
-#                                                  stays constant across versions
-# A checksums.txt (SHA-256) covering every artifact is written last.
+# dependency-free executable. One file name is written per target:
+#   synologycollector_<os>_<arch>[.exe]
+# The name is stable across versions, so a releases/latest/download URL (and a
+# pinned releases/download/<tag>/ URL) stays constant. The version is baked into
+# the binary instead — `synologycollector --version` reports it. A
+# checksums.txt (SHA-256) covering every artifact is written last.
 set -euo pipefail
 
 VERSION="${1:-dev}"
@@ -30,12 +30,10 @@ targets=(
 
 for t in "${targets[@]}"; do
   read -r goos goarch suffix <<<"${t}"
-  versioned="synologycollector_${VERSION}_${suffix}"
-  stable="synologycollector_${suffix}"
-  echo "building ${goos}/${goarch} -> ${OUTDIR}/${versioned}"
+  out="synologycollector_${suffix}"
+  echo "building ${goos}/${goarch} -> ${OUTDIR}/${out}"
   CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
-    go build -trimpath -ldflags "${LDFLAGS}" -o "${OUTDIR}/${versioned}" .
-  cp "${OUTDIR}/${versioned}" "${OUTDIR}/${stable}"
+    go build -trimpath -ldflags "${LDFLAGS}" -o "${OUTDIR}/${out}" .
 done
 
 # SHA-256 checksums for every artifact (sha256sum on Linux, shasum on macOS).
