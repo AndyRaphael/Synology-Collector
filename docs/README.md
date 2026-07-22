@@ -10,4 +10,4 @@ Full documentation for Synology Collector. New here? Start with the
 | [Output & exit codes](output.md) | The `KEY=VALUE` block, JSON document, KV key reference, and exit-code contract. |
 | [Synology NAS setup](synology-setup.md) | Creating the read-only DSM service account and choosing a TLS trust strategy. |
 | [NinjaOne integration](ninjaone.md) | The reference NinjaOne wrapper, custom-field mapping, and stale-run detection. |
-| [Operations & backup notes](operations.md) | Backup-freshness tuning, clock skew, and how the Active Backup API is classified. |
+| [Operations & backup notes](operations.md) | Backup-freshness tuning, clock skew, and how the backup APIs are classified. |

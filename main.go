@@ -166,14 +166,26 @@ func collect(ctx context.Context, cfg *Config, clock func() time.Time, debugf fu
 	}
 	r.Hyper = hb
 
-	checks := evaluate(cfg, sys, st, abb, hb)
+	m365, ferr := collectSaaS(runCtx, client, flavorM365, cfg.ExcludeM365Tasks, cfg.SaaSBackupMaxAge, now)
+	if ferr != nil {
+		return finishError(r, ferr.Error())
+	}
+	r.M365 = m365
+
+	gws, ferr := collectSaaS(runCtx, client, flavorGWS, cfg.ExcludeGWSTasks, cfg.SaaSBackupMaxAge, now)
+	if ferr != nil {
+		return finishError(r, ferr.Error())
+	}
+	r.GWS = gws
+
+	checks := evaluate(cfg, sys, st, abb, hb, m365, gws)
 	r.Checks = checks
 	if cfg.Debug {
 		r.Raw = client.RawPayloads()
 	}
 
 	// Coverage contract: some collection gaps mean no meaningful health statement.
-	if msg, isErr := coverageError(st, abb, hb); isErr {
+	if msg, isErr := coverageError(st, abb, hb, m365, gws); isErr {
 		r.Status = "ERROR"
 		r.ExitCode = ExitError
 		r.Error = sanitizeInline(msg)
@@ -184,7 +196,7 @@ func collect(ctx context.Context, cfg *Config, clock func() time.Time, debugf fu
 	sev := overallSeverity(checks)
 	r.Status = severityStatus(sev)
 	r.ExitCode = severityExitCode(sev)
-	r.Summary = buildSummary(checks, st, abb, hb)
+	r.Summary = buildSummary(checks, st, abb, hb, m365, gws)
 	return r
 }
 

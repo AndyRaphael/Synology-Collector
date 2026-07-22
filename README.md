@@ -6,8 +6,9 @@
 
 Synology Collector queries a Synology NAS through DSM's Web APIs and reports the
 signals that matter most for monitoring — above all **Active Backup for Business
-(ABB)** and **Hyper Backup** task status, backup freshness, and failed attempts —
-plus a few crucial storage and system facts (pool, volume usage, drive health).
+(ABB)**, **Hyper Backup**, and **Active Backup for Microsoft 365 / Google
+Workspace** task status, backup freshness, and failed attempts — plus a few
+crucial storage and system facts (pool, volume usage, drive health).
 
 It prints an RMM-friendly `KEY=VALUE` block and a full JSON document to stdout,
 and returns an exit code that drives alert conditions. No agent, service, or
@@ -18,9 +19,10 @@ binary directly.
 
 RMMs like NinjaOne already monitor Synology CPU, RAM, temperatures, and interface
 counters over SNMP. This collector deliberately does **not** duplicate those. It
-focuses on what SNMP cannot see: Active Backup and Hyper Backup tasks, their
-status and history, backup freshness, and failed/overdue backups — plus the
-handful of storage/system health signals needed to give an at-a-glance status.
+focuses on what SNMP cannot see: Active Backup, Hyper Backup, and the Microsoft
+365 / Google Workspace backup tasks, their status and history, backup freshness,
+and failed/overdue backups — plus the handful of storage/system health signals
+needed to give an at-a-glance status.
 
 ## Features
 
@@ -29,6 +31,10 @@ handful of storage/system health signals needed to give an at-a-glance status.
 - **Hyper Backup coverage** — per-task result, running/idle state, destination
   reachability, and backup-integrity results. Long-running syncs and multi-day
   integrity checks are reported as *running*, never as false failures or overdue.
+- **Microsoft 365 & Google Workspace coverage** — per-task last-run result,
+  running/idle state, and failed/overdue detection for the Active Backup SaaS
+  products. A continuous (M365) or long-running backup is reported as *running*,
+  never a false failure.
 - **Storage & system health** — storage pool state, per-volume usage thresholds,
   physical drive health, and DSM/model facts.
 - **Two consumable outputs** — a flat `KEY=VALUE` block for RMM field mapping and
@@ -72,6 +78,11 @@ HB_MONITORED=2
 HB_RUNNING=1
 HB_FAILED=0
 HB_OVERDUE=0
+M365_STATE=OK
+M365_MONITORED=3
+M365_RUNNING=1
+M365_FAILED=0
+GWS_STATE=NOT_INSTALLED
 SUMMARY=1 Active Backup task(s) overdue: WS-05 (last success 2026-07-19 02:14 UTC)
 ```
 
@@ -85,7 +96,7 @@ block followed by a `---` line and then the JSON. For a human-readable view, add
 | Code | Meaning  | When |
 |------|----------|------|
 | `0`  | healthy  | everything within thresholds |
-| `1`  | warning  | ABB or Hyper Backup task failed/overdue/cancelled/integrity/destination, drive warning, volume ≥ warn threshold |
+| `1`  | warning  | a backup task (Active Backup, Hyper Backup, or Microsoft 365 / Google Workspace) failed/overdue/cancelled/integrity/destination, drive warning, volume ≥ warn threshold |
 | `2`  | critical | storage pool/volume degraded, drive failed, volume ≥ crit threshold |
 | `3`  | error    | DSM auth failed, NAS unreachable, storage or backup data inaccessible |
 
@@ -100,15 +111,15 @@ See [Output & exit codes](docs/output.md) for the full contract.
 | [Output & exit codes](docs/output.md) | The `KEY=VALUE` block, JSON document, and exit-code contract. |
 | [Synology NAS setup](docs/synology-setup.md) | The read-only DSM service account and TLS trust strategy. |
 | [NinjaOne integration](docs/ninjaone.md) | The reference NinjaOne wrapper and stale-run detection. |
-| [Operations & backup notes](docs/operations.md) | Backup-freshness tuning and Active Backup / Hyper Backup API classification. |
+| [Operations & backup notes](docs/operations.md) | Backup-freshness tuning and Active Backup / Hyper Backup / Microsoft 365 / Google Workspace API classification. |
 
 ## Roadmap
 
-The collector interface is built so additional Synology backup products slot in
-as one file each, reusing the same auth, discovery, evaluation, and output.
-Active Backup for Business and Hyper Backup (`SYNO.Backup.Task`) are supported;
-next up:
+The collector monitors all four Synology backup products, each reusing the same
+auth, discovery, evaluation, and output:
 
+- Active Backup for Business (`SYNO.ActiveBackup.Task`)
+- Hyper Backup (`SYNO.Backup.Task`)
 - Active Backup for Microsoft 365 (`SYNO.ActiveBackupOffice365`)
 - Active Backup for Google Workspace (`SYNO.ActiveBackupGSuite`)
 

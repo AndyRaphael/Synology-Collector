@@ -26,6 +26,9 @@ synologycollector
 | `--exclude-task` | — | — | Exclude an Active Backup task from the monitored set, repeatable. |
 | `--hyperbackup-max-age` | — | `168h` (7d) | A monitored **Hyper Backup** task with no newer successful backup is overdue — but only while it is **idle**. A running task (a large sync or a backup-integrity check, either of which can run for days) is never overdue. Larger than `--backup-max-age` by design. |
 | `--exclude-hyperbackup-task` | — | — | Exclude a Hyper Backup task from the monitored set, repeatable (same selector forms). |
+| `--saas-backup-max-age` | — | `48h` | A monitored **Microsoft 365 / Google Workspace** task with no newer successful backup is overdue — but only while it is **idle**. A task backing up right now (M365 backs up continuously) is never overdue. |
+| `--exclude-m365-task` | — | — | Exclude an Active Backup for Microsoft 365 task from the monitored set, repeatable (same selector forms). |
+| `--exclude-gws-task` | — | — | Exclude an Active Backup for Google Workspace task from the monitored set, repeatable (same selector forms). |
 | `--timeout` | — | `90s` | Overall run timeout (per-request timeout is 30s). |
 | `--allow-http` | — | off | Permit cleartext HTTP (sends credentials unencrypted). |
 | `--insecure-skip-verify` | — | off | Disable TLS certificate verification (last resort). |
@@ -43,7 +46,8 @@ For the connection-security flags (`--tls-pin`, `--ca-file`,
 
 ## Task selectors
 
-`--task-max-age`, `--exclude-task`, and `--exclude-hyperbackup-task` accept:
+`--task-max-age`, `--exclude-task`, `--exclude-hyperbackup-task`,
+`--exclude-m365-task`, and `--exclude-gws-task` accept:
 
 - `id:123` — match by task ID (unambiguous).
 - `name:Nightly` — match by exact task name (unambiguous even for numeric names).
@@ -60,10 +64,10 @@ synologycollector --host nas --username svc --password-file secret.txt \
   --exclude-task "id:7"
 ```
 
-## Hyper Backup vs. Active Backup freshness
+## Backup freshness windows
 
-The two backup modules are monitored independently and have separate freshness
-windows because they behave very differently:
+Each backup module is monitored independently and has its own freshness window
+because they behave very differently:
 
 - **Active Backup** tasks run on a tight schedule; a missed nightly run is a real
   signal, so `--backup-max-age` defaults to `24h`.
@@ -75,6 +79,14 @@ windows because they behave very differently:
   larger `--hyperbackup-max-age` (default 7 days) to judge only **idle** tasks.
   Raise it further if your longest cycle plus its integrity check can exceed a
   week between successful completions.
+- **Microsoft 365 / Google Workspace** share `--saas-backup-max-age` (default
+  `48h`), applied only to **idle** tasks with the same running-suppresses-overdue
+  rule. M365 backs up *continuously* (so a healthy task refreshes within minutes),
+  while Google Workspace typically runs on a daily schedule; `48h` catches a
+  stalled backup within about two days without false-alarming on a missed cycle.
+  Both products report a *last-run failure* or a run that completed *with accounts
+  needing attention* as a warning, and an unrecognized status is surfaced (never
+  silently healthy).
 
 See [Operations → Backup freshness](operations.md#backup-freshness-caveats) for
 guidance on choosing freshness windows.

@@ -67,6 +67,15 @@ type dsmScenario struct {
 	hyperStatusErrCode          map[string]int    // task_id -> DSM code for the status call
 	hyperStatusRejectAdditional bool              // 402 when the status call passes `additional`
 
+	// Active Backup SaaS (SYNO.ActiveBackupOffice365 / SYNO.ActiveBackupGSuite). Not
+	// advertised by default; set the advertise flag to expose the API.
+	m365Advertise       bool
+	m365Tasks           string // list_tasks data (default {"tasks":[]})
+	m365TaskListErrCode int    // DSM code for the list_tasks call
+	gwsAdvertise        bool
+	gwsTasks            string // list_tasks data (default {"tasks":[]})
+	gwsTaskListErrCode  int    // DSM code for the list_tasks call
+
 	packages       []string
 	packageErrCode int
 	packageMissing bool   // Core.Package not advertised
@@ -178,6 +187,23 @@ func hyperStatusJSON(state, status, result string, lastEnd, nextTime int64) stri
 	return "{" + strings.Join(parts, ",") + "}"
 }
 
+// saasListData wraps Active Backup SaaS task entries in the list_tasks data shape.
+func saasListData(entries ...string) string {
+	return `{"tasks":[` + strings.Join(entries, ",") + `]}`
+}
+
+// saasTaskEntry builds one M365/GWS task entry: liveStatus is `status` (4=running),
+// resultStatus is `task_status` (2=success), errCode is task_status_error_code, and
+// lastExec is last_execution_time (0 omitted).
+func saasTaskEntry(id int, name string, liveStatus, resultStatus, errCode int, lastExec int64) string {
+	parts := []string{fmt.Sprintf(`"task_id":%d,"task_name":%q,"status":%d,"task_status":%d,"task_status_error_code":%d`,
+		id, name, liveStatus, resultStatus, errCode)}
+	if lastExec != 0 {
+		parts = append(parts, fmt.Sprintf(`"last_execution_time":%d`, lastExec))
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
 func (s *dsmScenario) apisOrDefault() map[string]apiAdv {
 	if s.apis != nil {
 		return s.apis
@@ -193,6 +219,12 @@ func (s *dsmScenario) apisOrDefault() map[string]apiAdv {
 	}
 	if s.hyperAdvertise {
 		m["SYNO.Backup.Task"] = apiAdv{"entry.cgi", 1, 1}
+	}
+	if s.m365Advertise {
+		m["SYNO.ActiveBackupOffice365"] = apiAdv{"entry.cgi", 1, 1}
+	}
+	if s.gwsAdvertise {
+		m["SYNO.ActiveBackupGSuite"] = apiAdv{"entry.cgi", 1, 1}
 	}
 	return m
 }
@@ -306,6 +338,18 @@ func (s *dsmScenario) handler() http.HandlerFunc {
 				return
 			}
 			writeSuccess(w, orDefault(s.hyperTasks, `{"task_list":[]}`))
+		case "SYNO.ActiveBackupOffice365":
+			if s.m365TaskListErrCode != 0 {
+				writeError(w, s.m365TaskListErrCode)
+				return
+			}
+			writeSuccess(w, orDefault(s.m365Tasks, `{"tasks":[]}`))
+		case "SYNO.ActiveBackupGSuite":
+			if s.gwsTaskListErrCode != 0 {
+				writeError(w, s.gwsTaskListErrCode)
+				return
+			}
+			writeSuccess(w, orDefault(s.gwsTasks, `{"tasks":[]}`))
 		default:
 			writeError(w, 103)
 		}
@@ -359,6 +403,7 @@ func testConfig(host string) *Config {
 		VolCritPct:        90,
 		BackupMaxAge:      24 * time.Hour,
 		HyperBackupMaxAge: 7 * 24 * time.Hour,
+		SaaSBackupMaxAge:  48 * time.Hour,
 		Timeout:           30 * time.Second,
 		InsecureTLS:       true,
 		Format:            "both",

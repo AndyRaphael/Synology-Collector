@@ -192,6 +192,29 @@ func hyperTaskBadge(t *HyperTask) htmlBadge {
 	}
 }
 
+// saasTaskBadge summarizes an Active Backup SaaS task's monitored outcome. A running
+// task is green: M365 continuous backup and long Google Workspace runs are healthy.
+func saasTaskBadge(t *SaaSTask) htmlBadge {
+	switch {
+	case !t.Enabled:
+		return htmlBadge{"Disabled", "muted"}
+	case t.Excluded:
+		return htmlBadge{"Excluded", "muted"}
+	case t.Running:
+		return htmlBadge{"Running", "ok"}
+	case t.Failed:
+		return htmlBadge{"Failed", "warn"}
+	case t.Partial:
+		return htmlBadge{"Attention", "warn"}
+	case t.Overdue:
+		return htmlBadge{"Overdue", "warn"}
+	case t.Unknown:
+		return htmlBadge{"Indeterminate", "warn"}
+	default:
+		return htmlBadge{"OK", "ok"}
+	}
+}
+
 // --- view model -------------------------------------------------------------
 
 type htmlBadge struct{ Label, Class string }
@@ -240,6 +263,19 @@ type htmlHyperTask struct {
 	Status                           htmlBadge
 }
 
+type htmlSaaSTask struct {
+	Name, LastBackup, Detail string
+	Status                   htmlBadge
+}
+
+// htmlSaaSSection is one Active Backup SaaS product's card (Microsoft 365 or Google
+// Workspace); the view holds a slice so both render from the same template block.
+type htmlSaaSSection struct {
+	Label, Note, LastSuccess string
+	Stats                    []htmlStat
+	Tasks                    []htmlSaaSTask
+}
+
 type htmlCheck struct {
 	Name, Message string
 	Sev           htmlBadge
@@ -268,6 +304,8 @@ type htmlView struct {
 	HyperStats       []htmlStat
 	HyperLastSuccess string
 	HyperTasks       []htmlHyperTask
+
+	SaaS []htmlSaaSSection
 
 	Checks []htmlCheck
 
@@ -441,6 +479,51 @@ func buildHTMLView(r *Report) htmlView {
 				})
 			}
 		}
+	}
+
+	// Active Backup for Microsoft 365 and Google Workspace.
+	for _, info := range []*SaaSInfo{r.M365, r.GWS} {
+		if info == nil {
+			continue
+		}
+		sec := htmlSaaSSection{Label: info.Flavor.Label}
+		switch info.State {
+		case StateNotInstalled:
+			sec.Note = info.Flavor.Label + " is not installed."
+		case StateUnavailable, StateError:
+			sec.Note = info.Flavor.Short + " information unavailable" + reasonSuffix(info.StateReason)
+		default: // ok / partial
+			if info.State == StatePartial {
+				sec.Note = "Coverage is partial" + reasonSuffix(info.StateReason)
+			}
+			sec.Stats = []htmlStat{
+				countStat("Tasks", info.Total, false),
+				countStat("Monitored", info.Monitored, false),
+				countStat("Running", info.Running, false),
+				countStat("Failed", info.brokenCount(), true),
+				countStat("Overdue", info.Overdue, true),
+				countStat("Disabled", info.Disabled, false),
+				countStat("Excluded", info.Excluded, false),
+			}
+			sec.LastSuccess = kvSaaSLastSuccess(info)
+			if info.LastSuccessState == LSKnown && info.LastSuccess != nil {
+				sec.LastSuccess = humanTime(*info.LastSuccess)
+			}
+			for i := range info.Tasks {
+				t := &info.Tasks[i]
+				detail := t.RunningNote
+				if detail == "" {
+					detail = t.Note
+				}
+				sec.Tasks = append(sec.Tasks, htmlSaaSTask{
+					Name:       t.Name,
+					LastBackup: fmtTimePtr(t.LastSuccess),
+					Detail:     orDash(detail),
+					Status:     saasTaskBadge(t),
+				})
+			}
+		}
+		v.SaaS = append(v.SaaS, sec)
 	}
 
 	// Checks.
@@ -728,6 +811,21 @@ footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
 </div>
 {{end}}
 
+{{range .SaaS}}
+<div class="card">
+<h2>{{.Label}}</h2>
+{{if .Note}}<p class="note">{{.Note}}</p>{{end}}
+{{if .Stats}}<div class="stats">{{range .Stats}}<div class="stat"><div class="n {{.Class}}">{{.Value}}</div><div class="l">{{.Label}}</div></div>{{end}}</div>{{end}}
+{{if .LastSuccess}}<p class="laststamp">Last monitored success · <b>{{.LastSuccess}}</b></p>{{end}}
+{{if .Tasks}}
+<table><thead><tr><th>Task</th><th>Last backup</th><th>Detail</th><th>Status</th></tr></thead><tbody>
+{{range .Tasks}}<tr><td>{{.Name}}</td><td>{{.LastBackup}}</td><td class="t">{{.Detail}}</td>
+<td><span class="badge {{.Status.Class}}">{{.Status.Label}}</span></td></tr>{{end}}
+</tbody></table>
+{{end}}
+</div>
+{{end}}
+
 {{if .Checks}}
 <div class="card">
 <h2>Checks</h2>
@@ -801,6 +899,18 @@ const htmlEmbedSrc = `<div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sa
 <table style="width:100%;border-collapse:collapse;margin-top:6px;">
 <tr><td style="{{thCSS}}">Task</td><td style="{{thCSS}}">Target</td><td style="{{thCSS}}">Last backup</td><td style="{{thCSS}}">Detail</td><td style="{{thCSS}}">Status</td></tr>
 {{range .HyperTasks}}<tr><td style="{{tdCSS}}">{{.Name}}</td><td style="{{tdCSS}}">{{.Target}}</td><td style="{{tdCSS}}">{{.LastBackup}}</td><td style="{{mutedCSS}}">{{.Detail}}</td><td style="{{tdCSS}}"><span style="{{badgeCSS .Status.Class}}">{{.Status.Label}}</span></td></tr>{{end}}
+</table>
+{{end}}
+{{end}}
+{{range .SaaS}}
+<div style="font-weight:600;margin:12px 0 6px;">{{.Label}}</div>
+{{if .Note}}<div style="color:#57606a;font-style:italic;">{{.Note}}</div>{{end}}
+{{if .Stats}}<div style="color:#57606a;margin:4px 0;">{{range .Stats}}{{.Label}} <span style="{{numCSS .Class}}">{{.Value}}</span>&nbsp;&nbsp;&nbsp;{{end}}</div>{{end}}
+{{if .LastSuccess}}<div style="color:#57606a;margin:4px 0;">Last monitored success · <b style="color:#1f2328;">{{.LastSuccess}}</b></div>{{end}}
+{{if .Tasks}}
+<table style="width:100%;border-collapse:collapse;margin-top:6px;">
+<tr><td style="{{thCSS}}">Task</td><td style="{{thCSS}}">Last backup</td><td style="{{thCSS}}">Detail</td><td style="{{thCSS}}">Status</td></tr>
+{{range .Tasks}}<tr><td style="{{tdCSS}}">{{.Name}}</td><td style="{{tdCSS}}">{{.LastBackup}}</td><td style="{{mutedCSS}}">{{.Detail}}</td><td style="{{tdCSS}}"><span style="{{badgeCSS .Status.Class}}">{{.Status.Label}}</span></td></tr>{{end}}
 </table>
 {{end}}
 {{end}}

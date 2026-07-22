@@ -23,6 +23,12 @@ on how the collector reads Synology's Active Backup and Hyper Backup APIs.
   **idle** tasks, so it catches a schedule that has genuinely stopped without
   false-alarming on a legitimately slow cycle. Raise the window if your longest
   sync-plus-integrity-check cycle can exceed a week between completions.
+- **Continuous Microsoft 365 backup.** M365 backs up *continuously* rather than on
+  a fixed schedule, and Google Workspace usually runs daily. Both share
+  `--saas-backup-max-age` (default 48h), applied only to **idle** tasks — a task
+  backing up right now is never overdue. A run that finished with accounts needing
+  attention (e.g. an unlicensed or permission-denied user) is reported as a
+  warning, distinct from a task-level failure.
 
 ## Notes on the Hyper Backup API
 
@@ -36,6 +42,34 @@ distinct failure modes it surfaces are a failed/partial run, a failed
 an **unreachable destination** (`dest_missing`). As with Active Backup, run once
 with `--debug` to capture the real status strings; unrecognized ones are added to
 `hyperResultMap` in [`collect_hyperbackup.go`](../collect_hyperbackup.go).
+
+## Notes on the Microsoft 365 & Google Workspace API
+
+`SYNO.ActiveBackupOffice365` and `SYNO.ActiveBackupGSuite` share the Active Backup
+engine and an almost-identical task shape, so one collector
+([`collect_saasbackup.go`](../collect_saasbackup.go)) serves both. A single
+`list_tasks` call returns every task with its status **inline** — there is no
+version-history pagination (unlike Active Backup) and no per-task status call
+(unlike Hyper Backup). Each task carries a live `status` (is it running now?), a
+`task_status` result code, a `task_status_error_code`, per-service `error_*`
+counts, an `attention_count`, and a `last_execution_time`.
+
+Classification is **evidence-based** and does **not** trust the `task_status`
+result code — that code is inconsistent between the two products (a healthy,
+successfully backed-up task reports `task_status` 2 on Microsoft 365 but 1 on
+Google Workspace, and GWS omits `task_status_error_code` entirely). Instead: a
+non-zero `task_status_error_code` is a failure; per-service `error_*` counts or
+`attention_count` are a *partial* (a warning); a task that has a dated
+`last_execution_time` with no error evidence is a *success*; and a task with no
+dated run has *never backed up* (overdue by design). The only numeric code relied
+on is the live `status` (4 = running, which suppresses overdue). `enable_schedule:
+false` is **normal** for M365 continuous backup and is not treated as "disabled".
+
+One caveat worth knowing: for a Microsoft 365 task in continuous mode that is not
+actively running, `last_execution_time` reflects its last real execution, which can
+legitimately be far in the past — so `M365_OVERDUE` will (correctly) flag a
+continuous backup that has actually stopped completing. Verify against the app's
+Activities/log page if a date looks surprising.
 
 ## Notes on the Active Backup API
 

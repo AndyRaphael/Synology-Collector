@@ -65,15 +65,24 @@ type Config struct {
 	// overdue), so this bounds "hasn't completed AND isn't currently running".
 	HyperBackupMaxAge time.Duration
 	ExcludeHyperTasks []Selector
-	Timeout           time.Duration
-	AllowHTTP         bool
-	InsecureTLS       bool
-	CAFile            string
-	TLSPin            string // normalized lowercase hex SHA-256, or ""
-	Format            string // kv | json | both
-	HTMLFile          string // optional path for a self-contained human-readable HTML report
-	EmbedHTMLFile     string // optional path for an inline-styled HTML fragment (WYSIWYG fields)
-	Debug             bool
+	// SaaSBackupMaxAge is the freshness window for the Active Backup SaaS collectors
+	// (Microsoft 365 and Google Workspace). Like Hyper Backup it is applied only to
+	// idle tasks — a task backing up right now is never overdue — so it bounds "hasn't
+	// completed a successful backup recently AND isn't currently running". It is
+	// separate from BackupMaxAge because M365 backs up continuously and Google
+	// Workspace on its own schedule.
+	SaaSBackupMaxAge time.Duration
+	ExcludeM365Tasks []Selector
+	ExcludeGWSTasks  []Selector
+	Timeout          time.Duration
+	AllowHTTP        bool
+	InsecureTLS      bool
+	CAFile           string
+	TLSPin           string // normalized lowercase hex SHA-256, or ""
+	Format           string // kv | json | both
+	HTMLFile         string // optional path for a self-contained human-readable HTML report
+	EmbedHTMLFile    string // optional path for an inline-styled HTML fragment (WYSIWYG fields)
+	Debug            bool
 }
 
 // stringList accumulates a repeatable flag's values.
@@ -101,6 +110,7 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 		volCrit      = fs.Int("vol-crit", 90, "volume usage critical threshold (percent)")
 		backupMaxAge = fs.Duration("backup-max-age", 24*time.Hour, "max age of last successful Active Backup before a task is overdue")
 		hyperMaxAge  = fs.Duration("hyperbackup-max-age", 7*24*time.Hour, "max age of last successful Hyper Backup before an idle task is overdue (larger than --backup-max-age because a large sync or integrity check can run for days; a running task is never overdue)")
+		saasMaxAge   = fs.Duration("saas-backup-max-age", 48*time.Hour, "max age of last successful Active Backup for Microsoft 365 / Google Workspace before an idle task is overdue (a running task is never overdue)")
 		timeout      = fs.Duration("timeout", 90*time.Second, "overall run timeout")
 		allowHTTP    = fs.Bool("allow-http", false, "permit cleartext http:// (sends credentials unencrypted)")
 		insecure     = fs.Bool("insecure-skip-verify", false, "disable TLS certificate verification (last resort)")
@@ -115,9 +125,13 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 	var taskMaxAge stringList
 	var excludeTask stringList
 	var excludeHyperTask stringList
+	var excludeM365Task stringList
+	var excludeGWSTask stringList
 	fs.Var(&taskMaxAge, "task-max-age", "per-task Active Backup freshness override SELECTOR=DURATION, repeatable (SELECTOR = id:N, name:X, or a bare name)")
 	fs.Var(&excludeTask, "exclude-task", "exclude an Active Backup task from the monitored set, repeatable (same SELECTOR forms)")
 	fs.Var(&excludeHyperTask, "exclude-hyperbackup-task", "exclude a Hyper Backup task from the monitored set, repeatable (same SELECTOR forms)")
+	fs.Var(&excludeM365Task, "exclude-m365-task", "exclude an Active Backup for Microsoft 365 task from the monitored set, repeatable (same SELECTOR forms)")
+	fs.Var(&excludeGWSTask, "exclude-gws-task", "exclude an Active Backup for Google Workspace task from the monitored set, repeatable (same SELECTOR forms)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err // includes flag.ErrHelp, handled by caller
@@ -134,6 +148,7 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 		VolCritPct:        *volCrit,
 		BackupMaxAge:      *backupMaxAge,
 		HyperBackupMaxAge: *hyperMaxAge,
+		SaaSBackupMaxAge:  *saasMaxAge,
 		Timeout:           *timeout,
 		AllowHTTP:         *allowHTTP,
 		InsecureTLS:       *insecure,
@@ -190,6 +205,9 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 	if cfg.HyperBackupMaxAge <= 0 {
 		return nil, fmt.Errorf("--hyperbackup-max-age must be positive, got %s", cfg.HyperBackupMaxAge)
 	}
+	if cfg.SaaSBackupMaxAge <= 0 {
+		return nil, fmt.Errorf("--saas-backup-max-age must be positive, got %s", cfg.SaaSBackupMaxAge)
+	}
 	if cfg.Timeout <= 0 {
 		return nil, fmt.Errorf("--timeout must be positive, got %s", cfg.Timeout)
 	}
@@ -220,6 +238,14 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 		return nil, err
 	}
 	cfg.ExcludeHyperTasks, err = parseSelectors(excludeHyperTask)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ExcludeM365Tasks, err = parseSelectors(excludeM365Task)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ExcludeGWSTasks, err = parseSelectors(excludeGWSTask)
 	if err != nil {
 		return nil, err
 	}

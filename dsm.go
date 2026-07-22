@@ -234,13 +234,15 @@ type apiEndpoint struct {
 // parse, per API. The negotiated request version is the max of the intersection
 // with the DSM-advertised [minVersion, maxVersion].
 var clientAPIVersions = map[string][2]int{
-	"SYNO.API.Auth":             {3, 7},
-	"SYNO.Core.System":          {1, 2},
-	"SYNO.Core.Package":         {1, 2},
-	"SYNO.Storage.CGI.Storage":  {1, 1},
-	"SYNO.ActiveBackup.Task":    {1, 1},
-	"SYNO.ActiveBackup.Version": {1, 1},
-	"SYNO.Backup.Task":          {1, 1},
+	"SYNO.API.Auth":              {3, 7},
+	"SYNO.Core.System":           {1, 2},
+	"SYNO.Core.Package":          {1, 2},
+	"SYNO.Storage.CGI.Storage":   {1, 1},
+	"SYNO.ActiveBackup.Task":     {1, 1},
+	"SYNO.ActiveBackup.Version":  {1, 1},
+	"SYNO.Backup.Task":           {1, 1},
+	"SYNO.ActiveBackupOffice365": {1, 1},
+	"SYNO.ActiveBackupGSuite":    {1, 1},
 }
 
 // Client is a stateful DSM Web API client. It writes to neither stdout nor stderr;

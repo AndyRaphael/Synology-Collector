@@ -78,6 +78,12 @@ $FieldMap = @{
     'HB_RUNNING'     = 'synoHbRunning'
     'HB_FAILED'      = 'synoHbFailed'
     'HB_OVERDUE'     = 'synoHbOverdue'
+    'M365_STATE'     = 'synoM365State'
+    'M365_FAILED'    = 'synoM365Failed'
+    'M365_OVERDUE'   = 'synoM365Overdue'
+    'GWS_STATE'      = 'synoGwsState'
+    'GWS_FAILED'     = 'synoGwsFailed'
+    'GWS_OVERDUE'    = 'synoGwsOverdue'
     'COLLECTED_AT'   = 'synoCollectedAt'
     'SUMMARY'        = 'synoSummary'
 }

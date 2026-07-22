@@ -90,6 +90,25 @@ func sampleReport() *Report {
 					LastSuccess: &ls, EffectiveMaxAge: "168h0m0s"},
 			},
 		},
+		M365: &SaaSInfo{
+			Flavor: flavorM365, State: StateOK, Total: 2, Monitored: 2, Failed: 1,
+			LastSuccess: &ls, LastSuccessState: LSKnown,
+			Tasks: []SaaSTask{
+				{TaskID: 1, Name: "Contoso Mail", Enabled: true, Monitored: true, Failed: true,
+					Note: "last backup failed (error code 5)", EffectiveMaxAge: "48h0m0s"},
+				// A running continuous backup: healthy activity, shown green.
+				{TaskID: 2, Name: "Contoso SharePoint", Enabled: true, Monitored: true,
+					Running: true, RunningNote: "backup in progress", EffectiveMaxAge: "48h0m0s"},
+			},
+		},
+		GWS: &SaaSInfo{
+			Flavor: flavorGWS, State: StateOK, Total: 1, Monitored: 1,
+			LastSuccess: &ls, LastSuccessState: LSKnown,
+			Tasks: []SaaSTask{
+				{TaskID: 1, Name: "Acme Drive", Enabled: true, Monitored: true,
+					LastSuccess: &ls, EffectiveMaxAge: "48h0m0s"},
+			},
+		},
 		Checks: []CheckResult{
 			{Name: "drive_health:Drive 4", Severity: SevOK, Message: "Drive 4 is healthy"},
 			{Name: "abb_failed", Severity: SevWarning, Message: "1 Active Backup task(s) failed: WS-05"},
@@ -120,6 +139,10 @@ func TestRenderHTMLHealthySections(t *testing.T) {
 		"Hyper Backup",                       // Hyper Backup section heading
 		"NAS-to-C2",                          // a Hyper Backup task
 		"backup-integrity check in progress", // a running task's activity note
+		"Active Backup for Microsoft 365",    // M365 section heading
+		"Contoso Mail",                       // an M365 task
+		"Active Backup for Google Workspace", // GWS section heading
+		"Acme Drive",                         // a GWS task
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
@@ -162,7 +185,7 @@ func TestRenderHTMLEmbedWYSIWYGSafe(t *testing.T) {
 	if !strings.Contains(out, "background:#dafbe1") {
 		t.Error("expected inline badge colors in the fragment")
 	}
-	for _, s := range []string{"WARNING", "DS923", "Sys partition normal", "2026-07-21 02:14 UTC", "Hyper Backup", "NAS-to-C2"} {
+	for _, s := range []string{"WARNING", "DS923", "Sys partition normal", "2026-07-21 02:14 UTC", "Hyper Backup", "NAS-to-C2", "Active Backup for Microsoft 365", "Contoso Mail", "Acme Drive"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("fragment missing %q", s)
 		}

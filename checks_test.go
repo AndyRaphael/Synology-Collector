@@ -123,7 +123,7 @@ func TestEvaluateDeepHistoryUnknownDoesNotFireABBUnknown(t *testing.T) {
 		}},
 	}
 	st := &StorageInfo{State: StateOK, Volumes: []Volume{{ID: "volume_1", Status: "normal"}}, Disks: []Disk{{Name: "d1", Status: "normal"}}}
-	checks := evaluate(testCfg(), &SystemInfo{State: StateOK}, st, abb, nil)
+	checks := evaluate(testCfg(), &SystemInfo{State: StateOK}, st, abb, nil, nil, nil)
 	for _, c := range checks {
 		if c.Name == "abb_unknown" {
 			t.Errorf("abb_unknown should not fire for deep-history unknowns")

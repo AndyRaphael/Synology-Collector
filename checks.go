@@ -75,7 +75,7 @@ var driveStatusSeverity = map[string]Severity{
 
 // coverageError reports whether the run cannot make a meaningful health statement
 // and must exit 3 (STATUS=ERROR), per the coverage contract.
-func coverageError(st *StorageInfo, abb *ABBInfo, hb *HyperInfo) (string, bool) {
+func coverageError(st *StorageInfo, abb *ABBInfo, hb *HyperInfo, m365, gws *SaaSInfo) (string, bool) {
 	if st == nil {
 		return "storage information is unavailable", true
 	}
@@ -88,12 +88,22 @@ func coverageError(st *StorageInfo, abb *ABBInfo, hb *HyperInfo) (string, bool) 
 			return "active backup: " + reasonOr(abb.StateReason, string(abb.State)), true
 		}
 	}
-	// Hyper Backup is an optional package: "not installed" is not a coverage gap.
-	// But if it IS present and we could not read it, that is a real monitoring gap.
+	// Hyper Backup and the SaaS backups are optional packages: "not installed" is not
+	// a coverage gap. But if one IS present and we could not read it, that is a real
+	// monitoring gap.
 	if hb != nil {
 		switch hb.State {
 		case StateError, StateUnavailable:
 			return "hyper backup: " + reasonOr(hb.StateReason, string(hb.State)), true
+		}
+	}
+	for _, s := range []*SaaSInfo{m365, gws} {
+		if s == nil {
+			continue
+		}
+		switch s.State {
+		case StateError, StateUnavailable:
+			return strings.ToLower(s.Flavor.Short) + " backup: " + reasonOr(s.StateReason, string(s.State)), true
 		}
 	}
 	return "", false
@@ -108,7 +118,7 @@ func reasonOr(reason, fallback string) string {
 
 // evaluate runs every check and returns the results. It never emits to stdout or
 // stderr, so the engine stays reusable by a future interactive UI.
-func evaluate(cfg *Config, sys *SystemInfo, st *StorageInfo, abb *ABBInfo, hb *HyperInfo) []CheckResult {
+func evaluate(cfg *Config, sys *SystemInfo, st *StorageInfo, abb *ABBInfo, hb *HyperInfo, m365, gws *SaaSInfo) []CheckResult {
 	var checks []CheckResult
 	add := func(name string, sev Severity, msg, val string) {
 		checks = append(checks, CheckResult{Name: name, Severity: sev, Message: sanitizeInline(msg), Value: sanitizeInline(val)})
@@ -236,7 +246,49 @@ func evaluate(cfg *Config, sys *SystemInfo, st *StorageInfo, abb *ABBInfo, hb *H
 		}
 	}
 
+	// Active Backup for Microsoft 365 and Google Workspace. Same rules as Hyper
+	// Backup: unavailable/error handled by coverageError upstream, a running task
+	// raises nothing, and every backup problem is a warning.
+	evaluateSaaS(m365, add)
+	evaluateSaaS(gws, add)
+
 	return checks
+}
+
+// evaluateSaaS emits checks for one Active Backup SaaS collector. The check-name
+// prefix is the lowercased KV prefix ("m365" / "gws").
+func evaluateSaaS(info *SaaSInfo, add func(name string, sev Severity, msg, val string)) {
+	if info == nil {
+		return
+	}
+	f := info.Flavor
+	p := strings.ToLower(f.Prefix)
+	switch info.State {
+	case StateNotInstalled:
+		add(p+"_installed", SevOK, f.Label+" is not installed", "not_installed")
+	case StatePartial:
+		add(p+"_partial", SevWarning, f.Short+" coverage is partial: "+info.StateReason, "partial")
+	}
+	if info.State == StateOK || info.State == StatePartial {
+		if info.Failed > 0 {
+			add(p+"_failed", SevWarning,
+				fmt.Sprintf("%d %s task(s) failed or incomplete: %s", info.Failed, f.Short,
+					saasNames(info, func(t *SaaSTask) bool { return t.Monitored && (t.Failed || t.Partial) })),
+				strconv.Itoa(info.Failed))
+		}
+		if info.Overdue > 0 {
+			add(p+"_overdue", SevWarning, saasOverdueMessage(info), strconv.Itoa(info.Overdue))
+		}
+		if info.Unknown > 0 {
+			add(p+"_unknown", SevWarning,
+				fmt.Sprintf("%d %s task(s) have an indeterminate status (run --debug and update the classifier): %s", info.Unknown, f.Short,
+					saasNames(info, func(t *SaaSTask) bool { return t.Monitored && t.Unknown })),
+				strconv.Itoa(info.Unknown))
+		}
+	}
+	for _, sel := range info.UnmatchedSelectors {
+		add(p+"_selector_unmatched", SevWarning, fmt.Sprintf("%s task selector %q matched no task", f.Short, sel), sel)
+	}
 }
 
 func overallSeverity(checks []CheckResult) Severity {
@@ -334,6 +386,33 @@ func hyperOverdueMessage(hb *HyperInfo) string {
 	return fmt.Sprintf("%d Hyper Backup task(s) overdue: %s", hb.Overdue, strings.Join(parts, "; "))
 }
 
+func saasNames(info *SaaSInfo, pred func(*SaaSTask) bool) string {
+	var names []string
+	for i := range info.Tasks {
+		t := &info.Tasks[i]
+		if pred(t) {
+			names = append(names, t.Name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+func saasOverdueMessage(info *SaaSInfo) string {
+	var parts []string
+	for i := range info.Tasks {
+		t := &info.Tasks[i]
+		if !(t.Monitored && t.Overdue) {
+			continue
+		}
+		if t.LastSuccess != nil {
+			parts = append(parts, fmt.Sprintf("%s (last success %s)", t.Name, humanTime(*t.LastSuccess)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s (never)", t.Name))
+		}
+	}
+	return fmt.Sprintf("%d %s task(s) overdue: %s", info.Overdue, info.Flavor.Short, strings.Join(parts, "; "))
+}
+
 func volLabel(v Volume) string {
 	if v.Name != "" {
 		return v.Name
@@ -372,7 +451,7 @@ func pctInt(p float64) int {
 
 // buildSummary joins non-OK check messages, or produces a healthy summary using
 // the monitored ABB count.
-func buildSummary(checks []CheckResult, st *StorageInfo, abb *ABBInfo, hb *HyperInfo) string {
+func buildSummary(checks []CheckResult, st *StorageInfo, abb *ABBInfo, hb *HyperInfo, m365, gws *SaaSInfo) string {
 	var msgs []string
 	for _, c := range checks {
 		if c.Severity != SevOK {
@@ -414,6 +493,22 @@ func buildSummary(checks []CheckResult, st *StorageInfo, abb *ABBInfo, hb *Hyper
 				seg := fmt.Sprintf("%d monitored Hyper Backup task(s) OK", hb.Monitored)
 				if hb.Running > 0 {
 					seg += fmt.Sprintf("; %d running", hb.Running)
+				}
+				parts = append(parts, seg)
+			}
+		}
+	}
+	// Same for the SaaS backups: mention each only when it is actually in use.
+	for _, info := range []*SaaSInfo{m365, gws} {
+		if info == nil {
+			continue
+		}
+		switch info.State {
+		case StateOK, StatePartial:
+			if info.Monitored > 0 {
+				seg := fmt.Sprintf("%d monitored %s task(s) OK", info.Monitored, info.Flavor.Short)
+				if info.Running > 0 {
+					seg += fmt.Sprintf("; %d running", info.Running)
 				}
 				parts = append(parts, seg)
 			}

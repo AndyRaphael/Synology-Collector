@@ -8,7 +8,7 @@ stdout and a process **exit code**. RMM conditions can match on either.
 | Code | Meaning  | When |
 |------|----------|------|
 | `0`  | healthy  | everything within thresholds |
-| `1`  | warning  | ABB task failed/overdue/cancelled, drive warning, volume ≥ warn threshold |
+| `1`  | warning  | a backup task (Active Backup, Hyper Backup, or Microsoft 365 / Google Workspace) failed/overdue/cancelled/integrity/destination, drive warning, volume ≥ warn threshold |
 | `2`  | critical | storage pool/volume degraded, drive failed, volume ≥ crit threshold |
 | `3`  | error    | DSM auth failed, NAS unreachable, storage or backup data inaccessible |
 
@@ -50,6 +50,24 @@ HB_RUNNING=1
 HB_FAILED=0
 HB_OVERDUE=0
 HB_LAST_SUCCESS=2026-07-18T01:00:00Z
+M365_STATE=OK
+M365_TASKS=3
+M365_MONITORED=3
+M365_DISABLED=0
+M365_EXCLUDED=0
+M365_RUNNING=1
+M365_FAILED=0
+M365_OVERDUE=0
+M365_LAST_SUCCESS=2026-07-21T11:52:00Z
+GWS_STATE=NOT_INSTALLED
+GWS_TASKS=0
+GWS_MONITORED=0
+GWS_DISABLED=0
+GWS_EXCLUDED=0
+GWS_RUNNING=0
+GWS_FAILED=0
+GWS_OVERDUE=0
+GWS_LAST_SUCCESS=N/A
 SUMMARY=1 Active Backup task(s) overdue: WS-05 (last success 2026-07-19 02:14 UTC)
 HOST=https://192.168.1.20:5001
 COLLECTED_AT=2026-07-21T12:34:56Z
@@ -135,6 +153,15 @@ for pushing it into a WYSIWYG field.
 | `HB_FAILED` | tasks with a broken backup: failed/partial run, failed integrity check, or unreachable destination |
 | `HB_OVERDUE` | **idle** tasks whose last success is older than `--hyperbackup-max-age` |
 | `HB_LAST_SUCCESS` | newest monitored Hyper Backup success (RFC3339 UTC) \| `never` \| `Unknown` \| `N/A` |
+| `M365_STATE` | `OK` \| `PARTIAL` \| `NOT_INSTALLED` \| `UNAVAILABLE` \| `ERROR` (Active Backup for Microsoft 365) |
+| `M365_TASKS` | total Microsoft 365 backup tasks configured |
+| `M365_MONITORED` | enabled and not excluded (the population that can alert) |
+| `M365_DISABLED` / `M365_EXCLUDED` | counts excluded from alerting |
+| `M365_RUNNING` | tasks currently backing up (healthy activity, never overdue) |
+| `M365_FAILED` | tasks whose last backup failed or completed with items needing attention |
+| `M365_OVERDUE` | **idle** tasks whose last success is older than `--saas-backup-max-age` |
+| `M365_LAST_SUCCESS` | newest monitored Microsoft 365 success (RFC3339 UTC) \| `never` \| `Unknown` \| `N/A` |
+| `GWS_*` | identical set for Active Backup for Google Workspace (`GWS_STATE`, `GWS_TASKS`, `GWS_MONITORED`, `GWS_DISABLED`, `GWS_EXCLUDED`, `GWS_RUNNING`, `GWS_FAILED`, `GWS_OVERDUE`, `GWS_LAST_SUCCESS`) |
 | `SUMMARY` | one-line human summary |
 | `HOST` | normalized base URL |
 | `COLLECTED_AT` | RFC3339 UTC run time |
@@ -143,21 +170,31 @@ for pushing it into a WYSIWYG field.
 `LAST_SUCCESS` distinguishes: a timestamp (a success is known); `never` (all
 monitored tasks have complete history and none ever succeeded); `Unknown`
 (indeterminate — history was truncated or a fetch failed); `N/A` (no monitored
-tasks, or ABB not installed). `HB_LAST_SUCCESS` follows the same convention for
-Hyper Backup.
+tasks, or ABB not installed). `HB_LAST_SUCCESS`, `M365_LAST_SUCCESS`, and
+`GWS_LAST_SUCCESS` follow the same convention for their respective products.
+
+The Microsoft 365 and Google Workspace keys mirror Hyper Backup's model exactly:
+`M365_RUNNING`/`GWS_RUNNING` count tasks backing up right now (M365 backs up
+continuously) and are **never** counted as overdue or failed; `*_OVERDUE` means
+"idle *and* stale" against `--saas-backup-max-age`; and `*_FAILED` counts a
+last-run failure or a run that completed with accounts needing attention.
 
 Hyper Backup's `HB_RUNNING` and `HB_OVERDUE` are deliberately kept apart: a task
 that is actively syncing or running a backup-integrity check counts only in
 `HB_RUNNING` and is **never** counted as overdue or failed, no matter how long it
 has been running. `HB_OVERDUE` therefore means "idle *and* stale" — a task that
 has stopped completing on schedule — not "still working." See
-[Configuration → Hyper Backup vs. Active Backup freshness](configuration.md#hyper-backup-vs-active-backup-freshness).
+[Configuration → Backup freshness windows](configuration.md#backup-freshness-windows).
 
 ## JSON document
 
 The JSON document carries `schema_version` (currently `1`), a secret-free config
-echo, typed `system`/`storage`/`abb`/`hyperbackup` sections each with a `state`,
-the full `checks` array, and — with `--debug` — the raw API payloads under `raw`.
-The `hyperbackup` section lists each task with its raw `state`/`status`, the
-classified `last_result`, `last_success`/`next_backup` timestamps, and the
-per-task `running`/`overdue`/`integrity_failed`/`dest_missing` flags.
+echo, typed `system`/`storage`/`abb`/`hyperbackup`/`m365`/`google_workspace`
+sections each with a `state`, the full `checks` array, and — with `--debug` — the
+raw API payloads under `raw`. The `hyperbackup` section lists each task with its
+raw `state`/`status`, the classified `last_result`, `last_success`/`next_backup`
+timestamps, and the per-task `running`/`overdue`/`integrity_failed`/`dest_missing`
+flags. The `m365` and `google_workspace` sections list each task with its raw
+`live_status`/`result_status`/`error_code`, the classified `last_result`,
+`last_run`/`last_success` timestamps, and the per-task
+`running`/`failed`/`partial`/`overdue` flags.

@@ -121,6 +121,12 @@ Step 2, then set `$MapCustomFields = $true` in the script. The field names mirro
 | `synoHbRunning` | Integer | `HB_RUNNING` | tasks actively backing up or running an integrity check (healthy) |
 | `synoHbFailed` | Integer | `HB_FAILED` | broken Hyper Backup tasks: failed/partial, integrity, or unreachable destination |
 | `synoHbOverdue` | Integer | `HB_OVERDUE` | **idle** Hyper Backup tasks past their freshness window |
+| `synoM365State` | Text | `M365_STATE` | Microsoft 365: `OK` / `PARTIAL` / `NOT_INSTALLED` / `UNAVAILABLE` / `ERROR` |
+| `synoM365Failed` | Integer | `M365_FAILED` | Microsoft 365 tasks that failed or need attention |
+| `synoM365Overdue` | Integer | `M365_OVERDUE` | **idle** Microsoft 365 tasks past their freshness window |
+| `synoGwsState` | Text | `GWS_STATE` | Google Workspace: `OK` / `PARTIAL` / `NOT_INSTALLED` / `UNAVAILABLE` / `ERROR` |
+| `synoGwsFailed` | Integer | `GWS_FAILED` | Google Workspace tasks that failed or need attention |
+| `synoGwsOverdue` | Integer | `GWS_OVERDUE` | **idle** Google Workspace tasks past their freshness window |
 | `synoCollectedAt` | Text | `COLLECTED_AT` | RFC3339 UTC run time (see [stale-run note](#detecting-the-collector-hasnt-run-recently)) |
 | `synoSummary` | Text (multi-line) | `SUMMARY` | one-line human summary |
 
@@ -145,7 +151,7 @@ and ticket:
 
 | Condition (Custom Field = `synoStatus`) | Value | Severity / priority | Typical cause |
 |---|---|---|---|
-| Synology warning | equals `WARNING` | Warning / Low | volume ≥ warn %, an ABB or Hyper Backup task failed/overdue/cancelled/integrity/destination, a transitional pool or drive state |
+| Synology warning | equals `WARNING` | Warning / Low | volume ≥ warn %, an Active Backup, Hyper Backup, or Microsoft 365 / Google Workspace task failed/overdue/cancelled/integrity/destination, a transitional pool or drive state |
 | Synology critical | equals `CRITICAL` | Critical / High | pool, volume, or drive degraded/crashed, or volume ≥ crit % |
 | Synology error | equals `ERROR` | Critical / High | collector could **not** assess — auth, connectivity, or coverage failure (fix the collector, credentials, or network, not NAS hardware) |
 

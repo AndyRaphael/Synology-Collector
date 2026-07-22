@@ -30,6 +30,7 @@ type ConfigEcho struct {
 	VolCritPct        int    `json:"vol_crit_pct"`
 	BackupMaxAge      string `json:"backup_max_age"`
 	HyperBackupMaxAge string `json:"hyperbackup_max_age"`
+	SaaSBackupMaxAge  string `json:"saas_backup_max_age"`
 	Timeout           string `json:"timeout"`
 	TLSVerify         string `json:"tls_verify"` // default | insecure | pinned | ca-file
 	Format            string `json:"format"`
@@ -52,6 +53,8 @@ type Report struct {
 	Storage          *StorageInfo          `json:"storage,omitempty"`
 	ABB              *ABBInfo              `json:"abb,omitempty"`
 	Hyper            *HyperInfo            `json:"hyperbackup,omitempty"`
+	M365             *SaaSInfo             `json:"m365,omitempty"`
+	GWS              *SaaSInfo             `json:"google_workspace,omitempty"`
 	Checks           []CheckResult         `json:"checks"`
 	Raw              map[string]RawPayload `json:"raw,omitempty"`
 }
@@ -73,6 +76,7 @@ func newConfigEcho(cfg *Config) ConfigEcho {
 		VolCritPct:        cfg.VolCritPct,
 		BackupMaxAge:      cfg.BackupMaxAge.String(),
 		HyperBackupMaxAge: cfg.HyperBackupMaxAge.String(),
+		SaaSBackupMaxAge:  cfg.SaaSBackupMaxAge.String(),
 		Timeout:           cfg.Timeout.String(),
 		TLSVerify:         verify,
 		Format:            cfg.Format,
@@ -121,7 +125,7 @@ func writeJSON(w io.Writer, r *Report) error {
 
 // renderKV emits the stable, ordered KEY=VALUE block.
 func renderKV(r *Report) string {
-	sys, st, abb, hb, checks := r.System, r.Storage, r.ABB, r.Hyper, r.Checks
+	sys, st, abb, hb, m365, gws, checks := r.System, r.Storage, r.ABB, r.Hyper, r.M365, r.GWS, r.Checks
 	var b strings.Builder
 	write := func(k, v string) {
 		fmt.Fprintf(&b, "%s=%s\n", k, sanitizeInline(v))
@@ -178,6 +182,9 @@ func renderKV(r *Report) string {
 	write("HB_FAILED", hbFail)
 	write("HB_OVERDUE", hbOver)
 	write("HB_LAST_SUCCESS", kvHyperLastSuccess(hb))
+
+	writeSaaS(write, m365, "M365")
+	writeSaaS(write, gws, "GWS")
 
 	write("SUMMARY", r.Summary)
 	write("HOST", r.Host)
@@ -377,6 +384,76 @@ func kvHyperLastSuccess(hb *HyperInfo) string {
 	case LSKnown:
 		if hb.LastSuccess != nil {
 			return hb.LastSuccess.UTC().Format(time.RFC3339)
+		}
+		return "Unknown"
+	case LSNever:
+		return "never"
+	default:
+		return "Unknown"
+	}
+}
+
+// writeSaaS emits the fixed KV block for one Active Backup SaaS collector, keyed by
+// the flavor prefix ("M365" / "GWS"). Every key is always emitted (Unknown sentinels
+// when the collector is unavailable) so the KV block stays stable.
+func writeSaaS(write func(k, v string), info *SaaSInfo, prefix string) {
+	write(prefix+"_STATE", kvSaaSState(info))
+	tasks, mon, dis, exc, run, fail, over := "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown"
+	if info != nil && info.State != StateUnavailable && info.State != StateError {
+		tasks = strconv.Itoa(info.Total)
+		mon = strconv.Itoa(info.Monitored)
+		dis = strconv.Itoa(info.Disabled)
+		exc = strconv.Itoa(info.Excluded)
+		run = strconv.Itoa(info.Running)
+		fail = strconv.Itoa(info.brokenCount())
+		over = strconv.Itoa(info.Overdue)
+	}
+	write(prefix+"_TASKS", tasks)
+	write(prefix+"_MONITORED", mon)
+	write(prefix+"_DISABLED", dis)
+	write(prefix+"_EXCLUDED", exc)
+	write(prefix+"_RUNNING", run)
+	write(prefix+"_FAILED", fail)
+	write(prefix+"_OVERDUE", over)
+	write(prefix+"_LAST_SUCCESS", kvSaaSLastSuccess(info))
+}
+
+func kvSaaSState(info *SaaSInfo) string {
+	if info == nil {
+		return "UNKNOWN"
+	}
+	switch info.State {
+	case StateOK:
+		return "OK"
+	case StatePartial:
+		return "PARTIAL"
+	case StateNotInstalled:
+		return "NOT_INSTALLED"
+	case StateUnavailable:
+		return "UNAVAILABLE"
+	case StateError:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func kvSaaSLastSuccess(info *SaaSInfo) string {
+	if info == nil {
+		return "Unknown"
+	}
+	switch info.State {
+	case StateNotInstalled:
+		return "N/A"
+	case StateUnavailable, StateError:
+		return "Unknown"
+	}
+	switch info.LastSuccessState {
+	case LSNone:
+		return "N/A"
+	case LSKnown:
+		if info.LastSuccess != nil {
+			return info.LastSuccess.UTC().Format(time.RFC3339)
 		}
 		return "Unknown"
 	case LSNever:
