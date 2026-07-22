@@ -240,6 +240,7 @@ var clientAPIVersions = map[string][2]int{
 	"SYNO.Storage.CGI.Storage":  {1, 1},
 	"SYNO.ActiveBackup.Task":    {1, 1},
 	"SYNO.ActiveBackup.Version": {1, 1},
+	"SYNO.Backup.Task":          {1, 1},
 }
 
 // Client is a stateful DSM Web API client. It writes to neither stdout nor stderr;

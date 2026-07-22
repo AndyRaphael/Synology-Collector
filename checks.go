@@ -75,7 +75,7 @@ var driveStatusSeverity = map[string]Severity{
 
 // coverageError reports whether the run cannot make a meaningful health statement
 // and must exit 3 (STATUS=ERROR), per the coverage contract.
-func coverageError(st *StorageInfo, abb *ABBInfo) (string, bool) {
+func coverageError(st *StorageInfo, abb *ABBInfo, hb *HyperInfo) (string, bool) {
 	if st == nil {
 		return "storage information is unavailable", true
 	}
@@ -86,6 +86,14 @@ func coverageError(st *StorageInfo, abb *ABBInfo) (string, bool) {
 		switch abb.State {
 		case StateError, StateUnavailable:
 			return "active backup: " + reasonOr(abb.StateReason, string(abb.State)), true
+		}
+	}
+	// Hyper Backup is an optional package: "not installed" is not a coverage gap.
+	// But if it IS present and we could not read it, that is a real monitoring gap.
+	if hb != nil {
+		switch hb.State {
+		case StateError, StateUnavailable:
+			return "hyper backup: " + reasonOr(hb.StateReason, string(hb.State)), true
 		}
 	}
 	return "", false
@@ -100,7 +108,7 @@ func reasonOr(reason, fallback string) string {
 
 // evaluate runs every check and returns the results. It never emits to stdout or
 // stderr, so the engine stays reusable by a future interactive UI.
-func evaluate(cfg *Config, sys *SystemInfo, st *StorageInfo, abb *ABBInfo) []CheckResult {
+func evaluate(cfg *Config, sys *SystemInfo, st *StorageInfo, abb *ABBInfo, hb *HyperInfo) []CheckResult {
 	var checks []CheckResult
 	add := func(name string, sev Severity, msg, val string) {
 		checks = append(checks, CheckResult{Name: name, Severity: sev, Message: sanitizeInline(msg), Value: sanitizeInline(val)})
@@ -178,6 +186,56 @@ func evaluate(cfg *Config, sys *SystemInfo, st *StorageInfo, abb *ABBInfo) []Che
 		}
 	}
 
+	// Hyper Backup checks. Unavailable/error states are handled by coverageError
+	// upstream; a running task raises nothing (a multi-day sync or integrity check
+	// is healthy activity). Backup problems are warnings, matching Active Backup.
+	if hb != nil {
+		switch hb.State {
+		case StateNotInstalled:
+			add("hyperbackup_installed", SevOK, "Hyper Backup is not installed", "not_installed")
+		case StatePartial:
+			add("hyperbackup_partial", SevWarning, "Hyper Backup coverage is partial: "+hb.StateReason, "partial")
+		}
+		if hb.State == StateOK || hb.State == StatePartial {
+			if hb.Failed > 0 {
+				add("hyperbackup_failed", SevWarning,
+					fmt.Sprintf("%d Hyper Backup task(s) failed: %s", hb.Failed, hyperNames(hb, func(t *HyperTask) bool { return t.Monitored && (t.Failed || t.Partial) })),
+					strconv.Itoa(hb.Failed))
+			}
+			if hb.Integrity > 0 {
+				add("hyperbackup_integrity", SevWarning,
+					fmt.Sprintf("%d Hyper Backup task(s) failed a backup-integrity check (backup data may be corrupt): %s", hb.Integrity, hyperNames(hb, func(t *HyperTask) bool { return t.Monitored && t.Integrity })),
+					strconv.Itoa(hb.Integrity))
+			}
+			if hb.DestMissing > 0 {
+				add("hyperbackup_destination", SevWarning,
+					fmt.Sprintf("%d Hyper Backup task(s) cannot reach their destination: %s", hb.DestMissing, hyperNames(hb, func(t *HyperTask) bool { return t.Monitored && t.DestMissing })),
+					strconv.Itoa(hb.DestMissing))
+			}
+			if hb.Overdue > 0 {
+				add("hyperbackup_overdue", SevWarning, hyperOverdueMessage(hb), strconv.Itoa(hb.Overdue))
+			}
+			if hb.Cancelled > 0 {
+				add("hyperbackup_cancelled", SevWarning,
+					fmt.Sprintf("%d Hyper Backup task(s) last ended cancelled: %s", hb.Cancelled, hyperNames(hb, func(t *HyperTask) bool { return t.Monitored && t.Cancelled })),
+					strconv.Itoa(hb.Cancelled))
+			}
+			if hb.Suspended > 0 {
+				add("hyperbackup_suspended", SevWarning,
+					fmt.Sprintf("%d Hyper Backup task(s) are suspended: %s", hb.Suspended, hyperNames(hb, func(t *HyperTask) bool { return t.Monitored && t.Suspended })),
+					strconv.Itoa(hb.Suspended))
+			}
+			if hb.Unknown > 0 {
+				add("hyperbackup_unknown", SevWarning,
+					fmt.Sprintf("%d Hyper Backup task(s) have an indeterminate status (run --debug and update the classifier): %s", hb.Unknown, hyperNames(hb, func(t *HyperTask) bool { return t.Monitored && t.Unknown })),
+					strconv.Itoa(hb.Unknown))
+			}
+		}
+		for _, sel := range hb.UnmatchedSelectors {
+			add("hyperbackup_selector_unmatched", SevWarning, fmt.Sprintf("Hyper Backup task selector %q matched no task", sel), sel)
+		}
+	}
+
 	return checks
 }
 
@@ -249,6 +307,33 @@ func abbNames(abb *ABBInfo, pred func(*ABBTask) bool) string {
 	return strings.Join(names, ", ")
 }
 
+func hyperNames(hb *HyperInfo, pred func(*HyperTask) bool) string {
+	var names []string
+	for i := range hb.Tasks {
+		t := &hb.Tasks[i]
+		if pred(t) {
+			names = append(names, t.Name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+func hyperOverdueMessage(hb *HyperInfo) string {
+	var parts []string
+	for i := range hb.Tasks {
+		t := &hb.Tasks[i]
+		if !(t.Monitored && t.Overdue) {
+			continue
+		}
+		if t.LastSuccess != nil {
+			parts = append(parts, fmt.Sprintf("%s (last success %s)", t.Name, humanTime(*t.LastSuccess)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s (never)", t.Name))
+		}
+	}
+	return fmt.Sprintf("%d Hyper Backup task(s) overdue: %s", hb.Overdue, strings.Join(parts, "; "))
+}
+
 func volLabel(v Volume) string {
 	if v.Name != "" {
 		return v.Name
@@ -287,7 +372,7 @@ func pctInt(p float64) int {
 
 // buildSummary joins non-OK check messages, or produces a healthy summary using
 // the monitored ABB count.
-func buildSummary(checks []CheckResult, st *StorageInfo, abb *ABBInfo) string {
+func buildSummary(checks []CheckResult, st *StorageInfo, abb *ABBInfo, hb *HyperInfo) string {
 	var msgs []string
 	for _, c := range checks {
 		if c.Severity != SevOK {
@@ -318,6 +403,20 @@ func buildSummary(checks []CheckResult, st *StorageInfo, abb *ABBInfo) string {
 				seg += fmt.Sprintf("; %d excluded", abb.Excluded)
 			}
 			parts = append(parts, seg)
+		}
+	}
+	if hb != nil {
+		switch hb.State {
+		case StateOK, StatePartial:
+			// Only mention Hyper Backup when it is actually in use, so a NAS without
+			// it stays succinct.
+			if hb.Monitored > 0 {
+				seg := fmt.Sprintf("%d monitored Hyper Backup task(s) OK", hb.Monitored)
+				if hb.Running > 0 {
+					seg += fmt.Sprintf("; %d running", hb.Running)
+				}
+				parts = append(parts, seg)
+			}
 		}
 	}
 	return truncateRunes(sanitizeInline(strings.Join(parts, "; ")), 500)

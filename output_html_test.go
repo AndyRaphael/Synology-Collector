@@ -79,6 +79,17 @@ func sampleReport() *Report {
 					Monitored: true, LastSuccess: &ls, EffectiveMaxAge: "24h0m0s"},
 			},
 		},
+		Hyper: &HyperInfo{
+			State: StateOK, Total: 2, Monitored: 2, Running: 1,
+			LastSuccess: &ls, LastSuccessState: LSKnown,
+			Tasks: []HyperTask{
+				// A running integrity check: healthy activity, shown with its note.
+				{TaskID: "1", Name: "NAS-to-C2", Target: "C2", Enabled: true, Monitored: true,
+					Running: true, RunningNote: "backup-integrity check in progress", EffectiveMaxAge: "168h0m0s"},
+				{TaskID: "2", Name: "Offsite-rsync", Target: "rsync", Enabled: true, Monitored: true,
+					LastSuccess: &ls, EffectiveMaxAge: "168h0m0s"},
+			},
+		},
 		Checks: []CheckResult{
 			{Name: "drive_health:Drive 4", Severity: SevOK, Message: "Drive 4 is healthy"},
 			{Name: "abb_failed", Severity: SevWarning, Message: "1 Active Backup task(s) failed: WS-05"},
@@ -101,11 +112,14 @@ func TestRenderHTMLHealthySections(t *testing.T) {
 		"12.0 TB",              // disk size, humanized
 		"Sys partition normal", // sys_partition_normal presented, not raw
 		"32°C",
-		"width:68%",              // volume usage bar rendered (would be ZgotmplZ if unsafe)
-		"WS-05",                  // task
-		`<div class="stat">`,     // ABB stat tiles
-		"Last monitored success", // last success on its own line, not a stat tile
-		"2026-07-21 02:14 UTC",   // timestamp formatted, not raw RFC3339
+		"width:68%",                          // volume usage bar rendered (would be ZgotmplZ if unsafe)
+		"WS-05",                              // task
+		`<div class="stat">`,                 // ABB stat tiles
+		"Last monitored success",             // last success on its own line, not a stat tile
+		"2026-07-21 02:14 UTC",               // timestamp formatted, not raw RFC3339
+		"Hyper Backup",                       // Hyper Backup section heading
+		"NAS-to-C2",                          // a Hyper Backup task
+		"backup-integrity check in progress", // a running task's activity note
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
@@ -148,7 +162,7 @@ func TestRenderHTMLEmbedWYSIWYGSafe(t *testing.T) {
 	if !strings.Contains(out, "background:#dafbe1") {
 		t.Error("expected inline badge colors in the fragment")
 	}
-	for _, s := range []string{"WARNING", "DS923", "Sys partition normal", "2026-07-21 02:14 UTC"} {
+	for _, s := range []string{"WARNING", "DS923", "Sys partition normal", "2026-07-21 02:14 UTC", "Hyper Backup", "NAS-to-C2"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("fragment missing %q", s)
 		}

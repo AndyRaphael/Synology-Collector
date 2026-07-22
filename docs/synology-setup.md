@@ -5,9 +5,11 @@ strategy for DSM's default self-signed certificate.
 
 ## DSM service account
 
-The storage and Active Backup APIs require an **administrators-group** account.
-A standard user receives permission errors (DSM code 105) and the collector
-reports the affected area as inaccessible.
+The storage, Active Backup, and Hyper Backup APIs require an
+**administrators-group** account. A standard user receives permission errors (DSM
+code 105) and the collector reports the affected area as inaccessible. (Hyper
+Backup is an optional package: if it is not installed, the collector reports it as
+`NOT_INSTALLED` — an expected, healthy state, not an error.)
 
 Recommended setup on the NAS:
 

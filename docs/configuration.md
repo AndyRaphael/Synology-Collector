@@ -21,9 +21,11 @@ synologycollector
 | `--password-file` | — | — | Read the password from a file, or `-` for stdin. |
 | `--vol-warn` | — | `80` | Volume usage warning threshold (percent). |
 | `--vol-crit` | — | `90` | Volume usage critical threshold (percent). |
-| `--backup-max-age` | — | `24h` | A monitored task with no newer successful backup is overdue. |
-| `--task-max-age` | — | — | Per-task freshness override, `SELECTOR=DURATION`, repeatable. |
-| `--exclude-task` | — | — | Exclude a task from the monitored set, repeatable. |
+| `--backup-max-age` | — | `24h` | A monitored **Active Backup** task with no newer successful backup is overdue. |
+| `--task-max-age` | — | — | Per-task Active Backup freshness override, `SELECTOR=DURATION`, repeatable. |
+| `--exclude-task` | — | — | Exclude an Active Backup task from the monitored set, repeatable. |
+| `--hyperbackup-max-age` | — | `168h` (7d) | A monitored **Hyper Backup** task with no newer successful backup is overdue — but only while it is **idle**. A running task (a large sync or a backup-integrity check, either of which can run for days) is never overdue. Larger than `--backup-max-age` by design. |
+| `--exclude-hyperbackup-task` | — | — | Exclude a Hyper Backup task from the monitored set, repeatable (same selector forms). |
 | `--timeout` | — | `90s` | Overall run timeout (per-request timeout is 30s). |
 | `--allow-http` | — | off | Permit cleartext HTTP (sends credentials unencrypted). |
 | `--insecure-skip-verify` | — | off | Disable TLS certificate verification (last resort). |
@@ -41,11 +43,11 @@ For the connection-security flags (`--tls-pin`, `--ca-file`,
 
 ## Task selectors
 
-`--task-max-age` and `--exclude-task` accept:
+`--task-max-age`, `--exclude-task`, and `--exclude-hyperbackup-task` accept:
 
-- `id:123` — match by numeric task ID (unambiguous).
+- `id:123` — match by task ID (unambiguous).
 - `name:Nightly` — match by exact task name (unambiguous even for numeric names).
-- `Nightly` — bare value: match by name first, then fall back to numeric ID.
+- `Nightly` — bare value: match by name first, then fall back to task ID.
 
 If a name matches more than one task, the collector exits `3` and lists the
 candidate IDs so you can disambiguate with `id:`. A selector that matches
@@ -57,6 +59,22 @@ synologycollector --host nas --username svc --password-file secret.txt \
   --task-max-age "name:Weekly Server=192h" \
   --exclude-task "id:7"
 ```
+
+## Hyper Backup vs. Active Backup freshness
+
+The two backup modules are monitored independently and have separate freshness
+windows because they behave very differently:
+
+- **Active Backup** tasks run on a tight schedule; a missed nightly run is a real
+  signal, so `--backup-max-age` defaults to `24h`.
+- **Hyper Backup** to a remote destination (Synology C2, S3, an rsync target) can
+  take **more than a day for a single sync** on a large dataset, and its
+  **backup-integrity check can also run for many hours**. The collector therefore
+  (1) never marks a task overdue or failed *while it is running* — a multi-day
+  sync or integrity check reports as `RUNNING`, not a problem — and (2) uses the
+  larger `--hyperbackup-max-age` (default 7 days) to judge only **idle** tasks.
+  Raise it further if your longest cycle plus its integrity check can exceed a
+  week between successful completions.
 
 See [Operations → Backup freshness](operations.md#backup-freshness-caveats) for
 guidance on choosing freshness windows.

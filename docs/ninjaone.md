@@ -26,8 +26,10 @@ can reach the NAS over the network. Two consequences:
    troubleshooting.
 4. Optionally maps the `KEY=VALUE` lines to **custom fields** via
    `Ninja-Property-Set` (set `$MapCustomFields = $true`).
-5. Exits with the collector's exit code, so a NinjaOne **condition** on script
-   result can notify a technician or open a ticket.
+5. Exits with the collector's exit code and mirrors that verdict into the
+   `STATUS` field, so a NinjaOne **custom-field condition** on `synoStatus` can
+   open a ticket or notify a technician (see
+   [Step 6](#step-6--alert-with-conditions)).
 
 ## Step 1 — Create the credential custom fields
 
@@ -115,6 +117,10 @@ Step 2, then set `$MapCustomFields = $true` in the script. The field names mirro
 | `synoAbbFailed` | Integer | `ABB_FAILED` | failed count over the monitored set |
 | `synoAbbOverdue` | Integer | `ABB_OVERDUE` | overdue count over the monitored set |
 | `synoLastSuccess` | Text | `LAST_SUCCESS` | a timestamp **or** `never` / `Unknown` / `N/A`, so keep it Text |
+| `synoHbState` | Text | `HB_STATE` | Hyper Backup: `OK` / `PARTIAL` / `NOT_INSTALLED` / `UNAVAILABLE` / `ERROR` |
+| `synoHbRunning` | Integer | `HB_RUNNING` | tasks actively backing up or running an integrity check (healthy) |
+| `synoHbFailed` | Integer | `HB_FAILED` | broken Hyper Backup tasks: failed/partial, integrity, or unreachable destination |
+| `synoHbOverdue` | Integer | `HB_OVERDUE` | **idle** Hyper Backup tasks past their freshness window |
 | `synoCollectedAt` | Text | `COLLECTED_AT` | RFC3339 UTC run time (see [stale-run note](#detecting-the-collector-hasnt-run-recently)) |
 | `synoSummary` | Text (multi-line) | `SUMMARY` | one-line human summary |
 
@@ -124,14 +130,44 @@ Step 2, then set `$MapCustomFields = $true` in the script. The field names mirro
 
 ## Step 6 — Alert with conditions
 
-Two complementary ways to raise alerts:
+The collector runs here as a **scheduled automation** (Step 4) on a single proxy
+agent. A scheduled automation writes the activity log and custom fields but does
+**not** raise a graded alert from its own exit code — so turn the results into
+alerts/tickets with **custom-field conditions** on the mapped `synoStatus` field.
+This is the right fit for a single-proxy deployment; it needs
+`$MapCustomFields = $true` (Step 5) so `synoStatus` is populated on every run.
 
-- **On the script result.** Add a **Script Result** condition: exit `1` =
-  warning, `2` = critical, `3` = collector/auth/connectivity error. Simplest, and
-  needs no custom fields.
-- **On the mapped fields.** Add custom-field conditions such as
-  `synoAbbFailed > 0`, `synoAbbOverdue > 0`, or `synoStatus = CRITICAL` when you
-  want distinct tickets per problem type.
+`synoStatus` (from `STATUS`) is a single overall verdict — the **worst** finding
+across every check — with exactly four values. A critical finding makes it
+`CRITICAL`, not `WARNING`, so match each value explicitly rather than treating
+"warning" as a catch-all. Create **three conditions**, each with its own priority
+and ticket:
+
+| Condition (Custom Field = `synoStatus`) | Value | Severity / priority | Typical cause |
+|---|---|---|---|
+| Synology warning | equals `WARNING` | Warning / Low | volume ≥ warn %, an ABB or Hyper Backup task failed/overdue/cancelled/integrity/destination, a transitional pool or drive state |
+| Synology critical | equals `CRITICAL` | Critical / High | pool, volume, or drive degraded/crashed, or volume ≥ crit % |
+| Synology error | equals `ERROR` | Critical / High | collector could **not** assess — auth, connectivity, or coverage failure (fix the collector, credentials, or network, not NAS hardware) |
+
+Give each condition a **Create Ticket** (and/or notification) action at the
+matching priority. Three conditions are better than one so `ERROR`/`CRITICAL` can
+page while `WARNING` only opens a low-priority ticket; if you'd rather have a
+single catch-all, one `synoStatus does not equal OK` condition covers all three
+at once. For distinct tickets per problem type you can add narrower field
+conditions too (e.g. `synoAbbFailed > 0`, `synoAbbOverdue > 0`,
+`synoHbFailed > 0`, `synoHbOverdue > 0`), but the three `synoStatus` conditions
+above already cover every case.
+
+> **Why not alert on the exit code?** NinjaOne can alert on a non-zero exit code,
+> but only by running the collector as a **policy** check evaluated per targeted
+> device — not as the single-proxy scheduled automation this guide uses. The
+> `synoStatus` conditions keep everything on the one proxy agent.
+
+> **Stale-value caveat.** If the script dies *before* the collector runs (e.g. it
+> cannot download the binary), it exits `3` but never reaches the field-mapping
+> block, so `synoStatus` keeps its previous value instead of turning `ERROR`. The
+> native **agent-offline** condition on the proxy device and the stale-`COLLECTED_AT`
+> check below backstop that gap.
 
 ### Detecting "the collector hasn't run recently"
 

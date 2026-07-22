@@ -41,6 +41,15 @@ ABB_EXCLUDED=0
 ABB_FAILED=0
 ABB_OVERDUE=1
 LAST_SUCCESS=2026-07-21T02:14:00Z
+HB_STATE=OK
+HB_TASKS=2
+HB_MONITORED=2
+HB_DISABLED=0
+HB_EXCLUDED=0
+HB_RUNNING=1
+HB_FAILED=0
+HB_OVERDUE=0
+HB_LAST_SUCCESS=2026-07-18T01:00:00Z
 SUMMARY=1 Active Backup task(s) overdue: WS-05 (last success 2026-07-19 02:14 UTC)
 HOST=https://192.168.1.20:5001
 COLLECTED_AT=2026-07-21T12:34:56Z
@@ -117,7 +126,15 @@ for pushing it into a WYSIWYG field.
 | `ABB_MONITORED` | enabled and not excluded (the population that can alert) |
 | `ABB_DISABLED` / `ABB_EXCLUDED` | counts excluded from alerting |
 | `ABB_FAILED` / `ABB_OVERDUE` | counts over the monitored set |
-| `LAST_SUCCESS` | newest monitored success (RFC3339 UTC) \| `never` \| `Unknown` \| `N/A` |
+| `LAST_SUCCESS` | newest monitored ABB success (RFC3339 UTC) \| `never` \| `Unknown` \| `N/A` |
+| `HB_STATE` | `OK` \| `PARTIAL` \| `NOT_INSTALLED` \| `UNAVAILABLE` \| `ERROR` (Hyper Backup) |
+| `HB_TASKS` | total Hyper Backup tasks configured |
+| `HB_MONITORED` | enabled and not excluded (the population that can alert) |
+| `HB_DISABLED` / `HB_EXCLUDED` | counts excluded from alerting |
+| `HB_RUNNING` | tasks currently backing up or running an integrity check (healthy activity, never overdue) |
+| `HB_FAILED` | tasks with a broken backup: failed/partial run, failed integrity check, or unreachable destination |
+| `HB_OVERDUE` | **idle** tasks whose last success is older than `--hyperbackup-max-age` |
+| `HB_LAST_SUCCESS` | newest monitored Hyper Backup success (RFC3339 UTC) \| `never` \| `Unknown` \| `N/A` |
 | `SUMMARY` | one-line human summary |
 | `HOST` | normalized base URL |
 | `COLLECTED_AT` | RFC3339 UTC run time |
@@ -126,10 +143,21 @@ for pushing it into a WYSIWYG field.
 `LAST_SUCCESS` distinguishes: a timestamp (a success is known); `never` (all
 monitored tasks have complete history and none ever succeeded); `Unknown`
 (indeterminate — history was truncated or a fetch failed); `N/A` (no monitored
-tasks, or ABB not installed).
+tasks, or ABB not installed). `HB_LAST_SUCCESS` follows the same convention for
+Hyper Backup.
+
+Hyper Backup's `HB_RUNNING` and `HB_OVERDUE` are deliberately kept apart: a task
+that is actively syncing or running a backup-integrity check counts only in
+`HB_RUNNING` and is **never** counted as overdue or failed, no matter how long it
+has been running. `HB_OVERDUE` therefore means "idle *and* stale" — a task that
+has stopped completing on schedule — not "still working." See
+[Configuration → Hyper Backup vs. Active Backup freshness](configuration.md#hyper-backup-vs-active-backup-freshness).
 
 ## JSON document
 
 The JSON document carries `schema_version` (currently `1`), a secret-free config
-echo, typed `system`/`storage`/`abb` sections each with a `state`, the full
-`checks` array, and — with `--debug` — the raw API payloads under `raw`.
+echo, typed `system`/`storage`/`abb`/`hyperbackup` sections each with a `state`,
+the full `checks` array, and — with `--debug` — the raw API payloads under `raw`.
+The `hyperbackup` section lists each task with its raw `state`/`status`, the
+classified `last_result`, `last_success`/`next_backup` timestamps, and the
+per-task `running`/`overdue`/`integrity_failed`/`dest_missing` flags.

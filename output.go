@@ -24,15 +24,16 @@ const (
 // ConfigEcho is the secret-free echo of configuration in the JSON report. It has
 // no password field at all.
 type ConfigEcho struct {
-	Host         string `json:"host"`
-	Username     string `json:"username"`
-	VolWarnPct   int    `json:"vol_warn_pct"`
-	VolCritPct   int    `json:"vol_crit_pct"`
-	BackupMaxAge string `json:"backup_max_age"`
-	Timeout      string `json:"timeout"`
-	TLSVerify    string `json:"tls_verify"` // default | insecure | pinned | ca-file
-	Format       string `json:"format"`
-	Debug        bool   `json:"debug"`
+	Host              string `json:"host"`
+	Username          string `json:"username"`
+	VolWarnPct        int    `json:"vol_warn_pct"`
+	VolCritPct        int    `json:"vol_crit_pct"`
+	BackupMaxAge      string `json:"backup_max_age"`
+	HyperBackupMaxAge string `json:"hyperbackup_max_age"`
+	Timeout           string `json:"timeout"`
+	TLSVerify         string `json:"tls_verify"` // default | insecure | pinned | ca-file
+	Format            string `json:"format"`
+	Debug             bool   `json:"debug"`
 }
 
 // Report is the full JSON document.
@@ -50,6 +51,7 @@ type Report struct {
 	System           *SystemInfo           `json:"system,omitempty"`
 	Storage          *StorageInfo          `json:"storage,omitempty"`
 	ABB              *ABBInfo              `json:"abb,omitempty"`
+	Hyper            *HyperInfo            `json:"hyperbackup,omitempty"`
 	Checks           []CheckResult         `json:"checks"`
 	Raw              map[string]RawPayload `json:"raw,omitempty"`
 }
@@ -65,15 +67,16 @@ func newConfigEcho(cfg *Config) ConfigEcho {
 		verify = "insecure"
 	}
 	return ConfigEcho{
-		Host:         cfg.Host,
-		Username:     cfg.Username,
-		VolWarnPct:   cfg.VolWarnPct,
-		VolCritPct:   cfg.VolCritPct,
-		BackupMaxAge: cfg.BackupMaxAge.String(),
-		Timeout:      cfg.Timeout.String(),
-		TLSVerify:    verify,
-		Format:       cfg.Format,
-		Debug:        cfg.Debug,
+		Host:              cfg.Host,
+		Username:          cfg.Username,
+		VolWarnPct:        cfg.VolWarnPct,
+		VolCritPct:        cfg.VolCritPct,
+		BackupMaxAge:      cfg.BackupMaxAge.String(),
+		HyperBackupMaxAge: cfg.HyperBackupMaxAge.String(),
+		Timeout:           cfg.Timeout.String(),
+		TLSVerify:         verify,
+		Format:            cfg.Format,
+		Debug:             cfg.Debug,
 	}
 }
 
@@ -118,7 +121,7 @@ func writeJSON(w io.Writer, r *Report) error {
 
 // renderKV emits the stable, ordered KEY=VALUE block.
 func renderKV(r *Report) string {
-	sys, st, abb, checks := r.System, r.Storage, r.ABB, r.Checks
+	sys, st, abb, hb, checks := r.System, r.Storage, r.ABB, r.Hyper, r.Checks
 	var b strings.Builder
 	write := func(k, v string) {
 		fmt.Fprintf(&b, "%s=%s\n", k, sanitizeInline(v))
@@ -155,6 +158,26 @@ func renderKV(r *Report) string {
 	write("ABB_FAILED", failed)
 	write("ABB_OVERDUE", overdue)
 	write("LAST_SUCCESS", kvLastSuccess(abb))
+
+	write("HB_STATE", kvHyperState(hb))
+	hbTasks, hbMon, hbDis, hbExc, hbRun, hbFail, hbOver := "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown", "Unknown"
+	if hb != nil && hb.State != StateUnavailable && hb.State != StateError {
+		hbTasks = strconv.Itoa(hb.Total)
+		hbMon = strconv.Itoa(hb.Monitored)
+		hbDis = strconv.Itoa(hb.Disabled)
+		hbExc = strconv.Itoa(hb.Excluded)
+		hbRun = strconv.Itoa(hb.Running)
+		hbFail = strconv.Itoa(hb.brokenCount())
+		hbOver = strconv.Itoa(hb.Overdue)
+	}
+	write("HB_TASKS", hbTasks)
+	write("HB_MONITORED", hbMon)
+	write("HB_DISABLED", hbDis)
+	write("HB_EXCLUDED", hbExc)
+	write("HB_RUNNING", hbRun)
+	write("HB_FAILED", hbFail)
+	write("HB_OVERDUE", hbOver)
+	write("HB_LAST_SUCCESS", kvHyperLastSuccess(hb))
 
 	write("SUMMARY", r.Summary)
 	write("HOST", r.Host)
@@ -309,6 +332,51 @@ func kvLastSuccess(abb *ABBInfo) string {
 	case LSKnown:
 		if abb.LastSuccess != nil {
 			return abb.LastSuccess.UTC().Format(time.RFC3339)
+		}
+		return "Unknown"
+	case LSNever:
+		return "never"
+	default:
+		return "Unknown"
+	}
+}
+
+func kvHyperState(hb *HyperInfo) string {
+	if hb == nil {
+		return "UNKNOWN"
+	}
+	switch hb.State {
+	case StateOK:
+		return "OK"
+	case StatePartial:
+		return "PARTIAL"
+	case StateNotInstalled:
+		return "NOT_INSTALLED"
+	case StateUnavailable:
+		return "UNAVAILABLE"
+	case StateError:
+		return "ERROR"
+	default:
+		return "UNKNOWN"
+	}
+}
+
+func kvHyperLastSuccess(hb *HyperInfo) string {
+	if hb == nil {
+		return "Unknown"
+	}
+	switch hb.State {
+	case StateNotInstalled:
+		return "N/A"
+	case StateUnavailable, StateError:
+		return "Unknown"
+	}
+	switch hb.LastSuccessState {
+	case LSNone:
+		return "N/A"
+	case LSKnown:
+		if hb.LastSuccess != nil {
+			return hb.LastSuccess.UTC().Format(time.RFC3339)
 		}
 		return "Unknown"
 	case LSNever:

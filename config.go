@@ -47,25 +47,33 @@ type TaskOverride struct {
 // Config holds all resolved runtime configuration. Password is never marshaled;
 // the JSON echo (see ConfigEcho in output.go) deliberately omits it.
 type Config struct {
-	RawHost       string // as supplied, for diagnostics
-	Host          string // normalized base URL, e.g. https://192.168.1.20:5001
-	Scheme        string // "https" or "http"
-	Username      string
-	Password      string
-	VolWarnPct    int
-	VolCritPct    int
-	BackupMaxAge  time.Duration
-	TaskMaxAge    []TaskOverride
-	ExcludeTasks  []Selector
-	Timeout       time.Duration
-	AllowHTTP     bool
-	InsecureTLS   bool
-	CAFile        string
-	TLSPin        string // normalized lowercase hex SHA-256, or ""
-	Format        string // kv | json | both
-	HTMLFile      string // optional path for a self-contained human-readable HTML report
-	EmbedHTMLFile string // optional path for an inline-styled HTML fragment (WYSIWYG fields)
-	Debug         bool
+	RawHost      string // as supplied, for diagnostics
+	Host         string // normalized base URL, e.g. https://192.168.1.20:5001
+	Scheme       string // "https" or "http"
+	Username     string
+	Password     string
+	VolWarnPct   int
+	VolCritPct   int
+	BackupMaxAge time.Duration
+	TaskMaxAge   []TaskOverride
+	ExcludeTasks []Selector
+	// HyperBackupMaxAge is the freshness window for Hyper Backup tasks. It is
+	// deliberately separate from (and larger than) BackupMaxAge: a Hyper Backup
+	// sync of a large dataset — or its backup-integrity check — routinely runs for
+	// well over a day, so reusing the 24h Active Backup window would false-alarm.
+	// Overdue is only evaluated when the task is idle (a running task is never
+	// overdue), so this bounds "hasn't completed AND isn't currently running".
+	HyperBackupMaxAge time.Duration
+	ExcludeHyperTasks []Selector
+	Timeout           time.Duration
+	AllowHTTP         bool
+	InsecureTLS       bool
+	CAFile            string
+	TLSPin            string // normalized lowercase hex SHA-256, or ""
+	Format            string // kv | json | both
+	HTMLFile          string // optional path for a self-contained human-readable HTML report
+	EmbedHTMLFile     string // optional path for an inline-styled HTML fragment (WYSIWYG fields)
+	Debug             bool
 }
 
 // stringList accumulates a repeatable flag's values.
@@ -91,7 +99,8 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 		passwordFile = fs.String("password-file", "", "read password from a file, or '-' for stdin")
 		volWarn      = fs.Int("vol-warn", 80, "volume usage warning threshold (percent)")
 		volCrit      = fs.Int("vol-crit", 90, "volume usage critical threshold (percent)")
-		backupMaxAge = fs.Duration("backup-max-age", 24*time.Hour, "max age of last successful backup before a task is overdue")
+		backupMaxAge = fs.Duration("backup-max-age", 24*time.Hour, "max age of last successful Active Backup before a task is overdue")
+		hyperMaxAge  = fs.Duration("hyperbackup-max-age", 7*24*time.Hour, "max age of last successful Hyper Backup before an idle task is overdue (larger than --backup-max-age because a large sync or integrity check can run for days; a running task is never overdue)")
 		timeout      = fs.Duration("timeout", 90*time.Second, "overall run timeout")
 		allowHTTP    = fs.Bool("allow-http", false, "permit cleartext http:// (sends credentials unencrypted)")
 		insecure     = fs.Bool("insecure-skip-verify", false, "disable TLS certificate verification (last resort)")
@@ -105,8 +114,10 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 	)
 	var taskMaxAge stringList
 	var excludeTask stringList
-	fs.Var(&taskMaxAge, "task-max-age", "per-task freshness override SELECTOR=DURATION, repeatable (SELECTOR = id:N, name:X, or a bare name)")
-	fs.Var(&excludeTask, "exclude-task", "exclude a task from the monitored set, repeatable (same SELECTOR forms)")
+	var excludeHyperTask stringList
+	fs.Var(&taskMaxAge, "task-max-age", "per-task Active Backup freshness override SELECTOR=DURATION, repeatable (SELECTOR = id:N, name:X, or a bare name)")
+	fs.Var(&excludeTask, "exclude-task", "exclude an Active Backup task from the monitored set, repeatable (same SELECTOR forms)")
+	fs.Var(&excludeHyperTask, "exclude-hyperbackup-task", "exclude a Hyper Backup task from the monitored set, repeatable (same SELECTOR forms)")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err // includes flag.ErrHelp, handled by caller
@@ -119,17 +130,18 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 	}
 
 	cfg := &Config{
-		VolWarnPct:    *volWarn,
-		VolCritPct:    *volCrit,
-		BackupMaxAge:  *backupMaxAge,
-		Timeout:       *timeout,
-		AllowHTTP:     *allowHTTP,
-		InsecureTLS:   *insecure,
-		CAFile:        *caFile,
-		Debug:         *debug,
-		Format:        strings.ToLower(strings.TrimSpace(*format)),
-		HTMLFile:      strings.TrimSpace(*htmlFile),
-		EmbedHTMLFile: strings.TrimSpace(*embedHTML),
+		VolWarnPct:        *volWarn,
+		VolCritPct:        *volCrit,
+		BackupMaxAge:      *backupMaxAge,
+		HyperBackupMaxAge: *hyperMaxAge,
+		Timeout:           *timeout,
+		AllowHTTP:         *allowHTTP,
+		InsecureTLS:       *insecure,
+		CAFile:            *caFile,
+		Debug:             *debug,
+		Format:            strings.ToLower(strings.TrimSpace(*format)),
+		HTMLFile:          strings.TrimSpace(*htmlFile),
+		EmbedHTMLFile:     strings.TrimSpace(*embedHTML),
 	}
 
 	// Host (flag, then env).
@@ -175,6 +187,9 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 	if cfg.BackupMaxAge <= 0 {
 		return nil, fmt.Errorf("--backup-max-age must be positive, got %s", cfg.BackupMaxAge)
 	}
+	if cfg.HyperBackupMaxAge <= 0 {
+		return nil, fmt.Errorf("--hyperbackup-max-age must be positive, got %s", cfg.HyperBackupMaxAge)
+	}
 	if cfg.Timeout <= 0 {
 		return nil, fmt.Errorf("--timeout must be positive, got %s", cfg.Timeout)
 	}
@@ -201,6 +216,10 @@ func parseConfig(args []string, getenv func(string) string, stdin io.Reader, std
 		return nil, err
 	}
 	cfg.ExcludeTasks, err = parseSelectors(excludeTask)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ExcludeHyperTasks, err = parseSelectors(excludeHyperTask)
 	if err != nil {
 		return nil, err
 	}

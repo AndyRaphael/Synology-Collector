@@ -58,6 +58,15 @@ type dsmScenario struct {
 	versions           map[int64][]string // task_id -> pages (each = versions-array data)
 	versionErrCode     map[int64]int
 
+	// Hyper Backup (SYNO.Backup.Task). Not advertised by default; set
+	// hyperAdvertise to expose the API so the collector reads it.
+	hyperAdvertise              bool
+	hyperTasks                  string            // task-list data (default {"task_list":[]})
+	hyperTaskListErrCode        int               // DSM code for the list call
+	hyperStatus                 map[string]string // task_id -> status data
+	hyperStatusErrCode          map[string]int    // task_id -> DSM code for the status call
+	hyperStatusRejectAdditional bool              // 402 when the status call passes `additional`
+
 	packages       []string
 	packageErrCode int
 	packageMissing bool   // Core.Package not advertised
@@ -65,8 +74,9 @@ type dsmScenario struct {
 
 	oversize bool // return a >8MB body for storage
 
-	mu           sync.Mutex
-	versionCalls []int64 // task_ids for which a version page was requested
+	mu               sync.Mutex
+	versionCalls     []int64  // task_ids for which a version page was requested
+	hyperStatusCalls []string // task_ids for which a Hyper Backup status was requested
 }
 
 func (s *dsmScenario) recordVersionCall(tid int64) {
@@ -79,6 +89,23 @@ func (s *dsmScenario) versionCalledFor(tid int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, v := range s.versionCalls {
+		if v == tid {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *dsmScenario) recordHyperStatusCall(tid string) {
+	s.mu.Lock()
+	s.hyperStatusCalls = append(s.hyperStatusCalls, tid)
+	s.mu.Unlock()
+}
+
+func (s *dsmScenario) hyperStatusCalledFor(tid string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, v := range s.hyperStatusCalls {
 		if v == tid {
 			return true
 		}
@@ -130,6 +157,27 @@ func versionJSON(timeEnd int64, status string) string {
 	return fmt.Sprintf(`{"time_end":%d,"status":%q}`, timeEnd, status)
 }
 
+// hyperListData wraps Hyper Backup task-list entries in the DSM envelope shape.
+func hyperListData(entries ...string) string {
+	return `{"task_list":[` + strings.Join(entries, ",") + `]}`
+}
+
+func hyperListEntry(id, name string) string {
+	return fmt.Sprintf(`{"task_id":%q,"task_name":%q}`, id, name)
+}
+
+// hyperStatusJSON builds a per-task status response; zero timestamps are omitted.
+func hyperStatusJSON(state, status, result string, lastEnd, nextTime int64) string {
+	parts := []string{fmt.Sprintf(`"state":%q,"status":%q,"last_bkp_result":%q`, state, status, result)}
+	if lastEnd != 0 {
+		parts = append(parts, fmt.Sprintf(`"last_bkp_end_time":%d`, lastEnd))
+	}
+	if nextTime != 0 {
+		parts = append(parts, fmt.Sprintf(`"next_bkp_time":%d`, nextTime))
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
 func (s *dsmScenario) apisOrDefault() map[string]apiAdv {
 	if s.apis != nil {
 		return s.apis
@@ -142,6 +190,9 @@ func (s *dsmScenario) apisOrDefault() map[string]apiAdv {
 	}
 	if s.packageMissing {
 		delete(m, "SYNO.Core.Package")
+	}
+	if s.hyperAdvertise {
+		m["SYNO.Backup.Task"] = apiAdv{"entry.cgi", 1, 1}
 	}
 	return m
 }
@@ -231,6 +282,30 @@ func (s *dsmScenario) handler() http.HandlerFunc {
 				return
 			}
 			writeSuccess(w, packagesData(s.packages))
+		case "SYNO.Backup.Task":
+			if method == "status" {
+				tid := r.FormValue("task_id")
+				s.recordHyperStatusCall(tid)
+				if s.hyperStatusRejectAdditional && r.FormValue("additional") != "" {
+					writeError(w, 402)
+					return
+				}
+				if code, ok := s.hyperStatusErrCode[tid]; ok {
+					writeError(w, code)
+					return
+				}
+				if body, ok := s.hyperStatus[tid]; ok {
+					writeSuccess(w, body)
+					return
+				}
+				writeSuccess(w, `{}`) // no fields → indeterminate
+				return
+			}
+			if s.hyperTaskListErrCode != 0 {
+				writeError(w, s.hyperTaskListErrCode)
+				return
+			}
+			writeSuccess(w, orDefault(s.hyperTasks, `{"task_list":[]}`))
 		default:
 			writeError(w, 103)
 		}
@@ -277,15 +352,16 @@ func packagesData(ids []string) string {
 
 func testConfig(host string) *Config {
 	return &Config{
-		Host:         host,
-		Username:     "svc",
-		Password:     "secret-pw",
-		VolWarnPct:   80,
-		VolCritPct:   90,
-		BackupMaxAge: 24 * time.Hour,
-		Timeout:      30 * time.Second,
-		InsecureTLS:  true,
-		Format:       "both",
+		Host:              host,
+		Username:          "svc",
+		Password:          "secret-pw",
+		VolWarnPct:        80,
+		VolCritPct:        90,
+		BackupMaxAge:      24 * time.Hour,
+		HyperBackupMaxAge: 7 * 24 * time.Hour,
+		Timeout:           30 * time.Second,
+		InsecureTLS:       true,
+		Format:            "both",
 	}
 }
 

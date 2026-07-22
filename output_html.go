@@ -161,6 +161,37 @@ func taskBadge(t *ABBTask) htmlBadge {
 	}
 }
 
+// hyperTaskBadge summarizes a Hyper Backup task's monitored outcome. A running
+// task is green: a long-running sync or integrity check is healthy activity.
+func hyperTaskBadge(t *HyperTask) htmlBadge {
+	switch {
+	case !t.Enabled:
+		return htmlBadge{"Disabled", "muted"}
+	case t.Excluded:
+		return htmlBadge{"Excluded", "muted"}
+	case t.Running:
+		return htmlBadge{"Running", "ok"}
+	case t.Failed:
+		return htmlBadge{"Failed", "warn"}
+	case t.Partial:
+		return htmlBadge{"Partial", "warn"}
+	case t.Integrity:
+		return htmlBadge{"Integrity", "warn"}
+	case t.DestMissing:
+		return htmlBadge{"Destination", "warn"}
+	case t.Overdue:
+		return htmlBadge{"Overdue", "warn"}
+	case t.Cancelled:
+		return htmlBadge{"Cancelled", "warn"}
+	case t.Suspended:
+		return htmlBadge{"Suspended", "warn"}
+	case t.Unknown:
+		return htmlBadge{"Indeterminate", "warn"}
+	default:
+		return htmlBadge{"OK", "ok"}
+	}
+}
+
 // --- view model -------------------------------------------------------------
 
 type htmlBadge struct{ Label, Class string }
@@ -204,6 +235,11 @@ type htmlTask struct {
 	Status                            htmlBadge
 }
 
+type htmlHyperTask struct {
+	Name, Target, LastBackup, Detail string
+	Status                           htmlBadge
+}
+
 type htmlCheck struct {
 	Name, Message string
 	Sev           htmlBadge
@@ -226,6 +262,12 @@ type htmlView struct {
 	ABBStats       []htmlStat
 	ABBLastSuccess string // formatted, or a sentinel (never / N/A / Unknown)
 	Tasks          []htmlTask
+
+	HasHyper         bool
+	HyperNote        string
+	HyperStats       []htmlStat
+	HyperLastSuccess string
+	HyperTasks       []htmlHyperTask
 
 	Checks []htmlCheck
 
@@ -354,6 +396,48 @@ func buildHTMLView(r *Report) htmlView {
 					MaxAge:      orDash(t.EffectiveMaxAge),
 					LastSuccess: fmtTimePtr(t.LastSuccess),
 					Status:      taskBadge(t),
+				})
+			}
+		}
+	}
+
+	// Hyper Backup.
+	if r.Hyper != nil {
+		v.HasHyper = true
+		switch r.Hyper.State {
+		case StateNotInstalled:
+			v.HyperNote = "Hyper Backup is not installed."
+		case StateUnavailable, StateError:
+			v.HyperNote = "Hyper Backup information unavailable" + reasonSuffix(r.Hyper.StateReason)
+		default: // ok / partial
+			if r.Hyper.State == StatePartial {
+				v.HyperNote = "Coverage is partial" + reasonSuffix(r.Hyper.StateReason)
+			}
+			v.HyperStats = []htmlStat{
+				countStat("Tasks", r.Hyper.Total, false),
+				countStat("Monitored", r.Hyper.Monitored, false),
+				countStat("Running", r.Hyper.Running, false),
+				countStat("Failed", r.Hyper.brokenCount(), true),
+				countStat("Overdue", r.Hyper.Overdue, true),
+				countStat("Disabled", r.Hyper.Disabled, false),
+				countStat("Excluded", r.Hyper.Excluded, false),
+			}
+			v.HyperLastSuccess = kvHyperLastSuccess(r.Hyper)
+			if r.Hyper.LastSuccessState == LSKnown && r.Hyper.LastSuccess != nil {
+				v.HyperLastSuccess = humanTime(*r.Hyper.LastSuccess)
+			}
+			for i := range r.Hyper.Tasks {
+				t := &r.Hyper.Tasks[i]
+				detail := t.RunningNote
+				if detail == "" {
+					detail = t.Note
+				}
+				v.HyperTasks = append(v.HyperTasks, htmlHyperTask{
+					Name:       t.Name,
+					Target:     orDash(t.Target),
+					LastBackup: fmtTimePtr(t.LastSuccess),
+					Detail:     orDash(detail),
+					Status:     hyperTaskBadge(t),
 				})
 			}
 		}
@@ -629,6 +713,21 @@ footer{color:var(--muted);font-size:12px;text-align:center;margin-top:24px}
 </div>
 {{end}}
 
+{{if .HasHyper}}
+<div class="card">
+<h2>Hyper Backup</h2>
+{{if .HyperNote}}<p class="note">{{.HyperNote}}</p>{{end}}
+{{if .HyperStats}}<div class="stats">{{range .HyperStats}}<div class="stat"><div class="n {{.Class}}">{{.Value}}</div><div class="l">{{.Label}}</div></div>{{end}}</div>{{end}}
+{{if .HyperLastSuccess}}<p class="laststamp">Last monitored success · <b>{{.HyperLastSuccess}}</b></p>{{end}}
+{{if .HyperTasks}}
+<table><thead><tr><th>Task</th><th>Target</th><th>Last backup</th><th>Detail</th><th>Status</th></tr></thead><tbody>
+{{range .HyperTasks}}<tr><td>{{.Name}}</td><td>{{.Target}}</td><td>{{.LastBackup}}</td><td class="t">{{.Detail}}</td>
+<td><span class="badge {{.Status.Class}}">{{.Status.Label}}</span></td></tr>{{end}}
+</tbody></table>
+{{end}}
+</div>
+{{end}}
+
 {{if .Checks}}
 <div class="card">
 <h2>Checks</h2>
@@ -690,6 +789,18 @@ const htmlEmbedSrc = `<div style="font-family:Segoe UI,Roboto,Helvetica,Arial,sa
 <table style="width:100%;border-collapse:collapse;margin-top:6px;">
 <tr><td style="{{thCSS}}">Task</td><td style="{{thCSS}}">Source</td><td style="{{thCSS}}">Max age</td><td style="{{thCSS}}">Last success</td><td style="{{thCSS}}">Status</td></tr>
 {{range .Tasks}}<tr><td style="{{tdCSS}}">{{.Name}}</td><td style="{{tdCSS}}">{{.Source}}</td><td style="{{tdCSS}}">{{.MaxAge}}</td><td style="{{tdCSS}}">{{.LastSuccess}}</td><td style="{{tdCSS}}"><span style="{{badgeCSS .Status.Class}}">{{.Status.Label}}</span></td></tr>{{end}}
+</table>
+{{end}}
+{{end}}
+{{if .HasHyper}}
+<div style="font-weight:600;margin:12px 0 6px;">Hyper Backup</div>
+{{if .HyperNote}}<div style="color:#57606a;font-style:italic;">{{.HyperNote}}</div>{{end}}
+{{if .HyperStats}}<div style="color:#57606a;margin:4px 0;">{{range .HyperStats}}{{.Label}} <span style="{{numCSS .Class}}">{{.Value}}</span>&nbsp;&nbsp;&nbsp;{{end}}</div>{{end}}
+{{if .HyperLastSuccess}}<div style="color:#57606a;margin:4px 0;">Last monitored success · <b style="color:#1f2328;">{{.HyperLastSuccess}}</b></div>{{end}}
+{{if .HyperTasks}}
+<table style="width:100%;border-collapse:collapse;margin-top:6px;">
+<tr><td style="{{thCSS}}">Task</td><td style="{{thCSS}}">Target</td><td style="{{thCSS}}">Last backup</td><td style="{{thCSS}}">Detail</td><td style="{{thCSS}}">Status</td></tr>
+{{range .HyperTasks}}<tr><td style="{{tdCSS}}">{{.Name}}</td><td style="{{tdCSS}}">{{.Target}}</td><td style="{{tdCSS}}">{{.LastBackup}}</td><td style="{{mutedCSS}}">{{.Detail}}</td><td style="{{tdCSS}}"><span style="{{badgeCSS .Status.Class}}">{{.Status.Label}}</span></td></tr>{{end}}
 </table>
 {{end}}
 {{end}}

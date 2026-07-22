@@ -160,14 +160,20 @@ func collect(ctx context.Context, cfg *Config, clock func() time.Time, debugf fu
 	}
 	r.ABB = abb
 
-	checks := evaluate(cfg, sys, st, abb)
+	hb, ferr := collectHyper(runCtx, client, cfg, now)
+	if ferr != nil {
+		return finishError(r, ferr.Error())
+	}
+	r.Hyper = hb
+
+	checks := evaluate(cfg, sys, st, abb, hb)
 	r.Checks = checks
 	if cfg.Debug {
 		r.Raw = client.RawPayloads()
 	}
 
 	// Coverage contract: some collection gaps mean no meaningful health statement.
-	if msg, isErr := coverageError(st, abb); isErr {
+	if msg, isErr := coverageError(st, abb, hb); isErr {
 		r.Status = "ERROR"
 		r.ExitCode = ExitError
 		r.Error = sanitizeInline(msg)
@@ -178,7 +184,7 @@ func collect(ctx context.Context, cfg *Config, clock func() time.Time, debugf fu
 	sev := overallSeverity(checks)
 	r.Status = severityStatus(sev)
 	r.ExitCode = severityExitCode(sev)
-	r.Summary = buildSummary(checks, st, abb)
+	r.Summary = buildSummary(checks, st, abb, hb)
 	return r
 }
 
